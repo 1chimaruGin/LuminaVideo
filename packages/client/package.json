@@ -1,0 +1,19 @@
+{
+  "name": "@lumina/client",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "openapi-ts",
+    "check": "node ./scripts/check-stale.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "^0.64.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@hey-api/client-fetch": "^0.13.1"
+  }
+}

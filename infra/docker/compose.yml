@@ -1,0 +1,57 @@
+# Local development infrastructure only. The API and web app run on the host for fast
+# reload; only stateful services live here.
+name: lumina
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lumina
+      POSTGRES_PASSWORD: lumina
+      POSTGRES_DB: lumina
+    ports: ['5432:5432']
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lumina']
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+    command: redis-server --save '' --appendonly no
+
+  # R2 stands in as MinIO locally: same S3 API, so the storage layer needs no branch.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: lumina
+      MINIO_ROOT_PASSWORD: lumina-dev-secret
+    ports: ['9000:9000', '9001:9001']
+    volumes: ['miniodata:/data']
+
+  createbucket:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 lumina lumina-dev-secret; do sleep 1; done;
+      mc mb --ignore-existing local/lumina-assets;
+      mc anonymous set download local/lumina-assets;
+      "
+
+  # Resumable uploads. Large phone video over a variable connection is the normal case.
+  tusd:
+    image: tusproject/tusd:latest
+    command: -s3-bucket lumina-assets -s3-endpoint http://minio:9000 -behind-proxy
+    environment:
+      AWS_ACCESS_KEY_ID: lumina
+      AWS_SECRET_ACCESS_KEY: lumina-dev-secret
+      AWS_REGION: us-east-1
+    ports: ['1080:8080']
+    depends_on: [minio]
+
+volumes:
+  pgdata:
+  miniodata:

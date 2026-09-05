@@ -1,0 +1,5092 @@
+/*
+ * Lumina.
+ *
+ * Structure first, because that is what the earlier attempts got wrong.
+ *
+ * The product is a funnel — describe it, confirm the plan, pick what to finish, publish —
+ * so the interface is a flow, not a dashboard. There is no persistent tool rail, because
+ * design-brief.md is explicit that a flat menu of tools is the thing this replaces: it makes
+ * the creator diagnose their own problem before they can start. Navigation is progress
+ * through the funnel; everything else lives behind one menu.
+ *
+ * Written mobile-first and scaled up, not the reverse. Every size below is a min-width
+ * query, so the phone layout is the base case rather than the fallback.
+ *
+ * The look: the scene imagery *is* the interface. Frames run large and full-bleed, chrome
+ * is thin and mostly transparent, and the one accent marks the one action that spends money.
+ */
+
+:root {
+  --bg: #050710;
+  --bg-2: #0b0f1c;
+  --panel: rgba(22, 28, 46, 0.72);
+  --panel-solid: #141a2c;
+  --line: rgba(160, 180, 235, 0.16);
+  --line-2: rgba(160, 180, 235, 0.3);
+
+  --ink: #f2f5ff;
+  --ink-2: #c3cbe6;
+  --ink-3: #8d97b8;
+  --ink-4: #6a7496;
+
+  --accent: #ffc36b;
+  --accent-2: #ff8a3d;
+  --accent-ink: #1c1103;
+  --accent-soft: rgba(255, 195, 107, 0.14);
+  /* The accent at border strength. Eleven rules referenced this and none defined it, so every
+     focus ring and every hover outline in the app silently kept whatever border it already
+     had — the declaration is invalid, so the cascade drops it. */
+  --accent-line: rgba(255, 195, 107, 0.45);
+  --good: #6ee7a8;
+
+  /*
+   * Type.
+   *
+   * Inter for UI because it is drawn for screen sizes and holds up at 13-15px, which is
+   * where most of this interface lives. Space Grotesk for display — it has the geometric
+   * character the mark implies. JetBrains Mono for anything measured.
+   *
+   * Every weight used anywhere below must exist in the link in index.html. An earlier build
+   * asked for Space Grotesk 300 and IBM Plex Mono without loading either, so the wordmark
+   * was a faux-light synthesis and every timecode fell back to the OS monospace.
+   */
+  --ui: 'Inter', 'Noto Sans Myanmar', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans SC',
+    'Noto Sans Thai', system-ui, sans-serif;
+  --display: 'Space Grotesk', var(--ui);
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  --r: 16px;
+  --r-lg: 22px;
+  --pad: 20px;
+  --bar: 76px;
+
+  --shadow: 0 2px 6px rgba(0, 0, 0, 0.4), 0 20px 50px -24px rgba(0, 0, 0, 0.9);
+}
+
+@media (min-width: 900px) {
+  :root {
+    --pad: 40px;
+    --bar: 88px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-optical-sizing: auto;
+  /* Inter's contextual alternates give a proper single-storey 'a' spacing and better
+     punctuation; tabular figures keep credits and timecodes from jittering as they change. */
+  font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss03' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+/* Anything that counts, measures or ticks upward uses lining tabular figures. */
+.tc,
+.pill,
+.idx,
+.kicker,
+.tag,
+.label,
+.topbar .who span,
+.actionbar .why b {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+/* ===================================================================  shell */
+
+/*
+ * A column, not a three-row grid.
+ *
+ * The grid named three rows — header, work, action — and the shell has four children, because
+ * `<Cosmos />` is one of them. It takes no space (it is fixed), but it still takes a *row*, so
+ * every template slid by one: the `1fr` landed on the top bar, which swelled to fill the
+ * screen, and `.view` fell through to `auto` and sized to its content.
+ *
+ * On a tall screen that pushed the page half way down — on a 1080px desktop the work started
+ * at y=527 under an empty top bar 527px tall. On a short one `.view` could not scroll,
+ * because a box sized to its content has nothing to scroll, so the last row of cards sat
+ * under the action bar with no way to reach it.
+ *
+ * A column says the thing that is true and survives another child being added: everything is
+ * its own height except the work, which takes the rest.
+ */
+.shell {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /*
+   * `min-width: 0` on the children is load-bearing, not decoration. A flex item defaults to
+   * `min-width: auto`, meaning it refuses to shrink below its contents — so any child wider
+   * than the viewport (the scene grid on a narrow phone) inflates past the screen, and
+   * `overflow: hidden` then clips it. The page does not scroll sideways, so the usual overflow
+   * check passes while the right edge of the UI is quietly cut off.
+   */
+  overflow: hidden;
+}
+
+.shell > * {
+  min-width: 0;
+}
+
+/* The work takes what is left; everything else is its own height. */
+.shell > .view {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The live universe. Fixed behind everything, never scrolls, never takes a pointer event. */
+.cosmos {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/*
+ * The brand mark.
+ *
+ * The logo is a black hole, and it is the source of the light everything else is lit by — so
+ * it gets a real glow rather than sitting flat, and the wordmark carries the same wide
+ * tracking as the lockup.
+ */
+/* Back and the mark together, so the brand survives navigation. */
+.lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-width: 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+/* The wordmark is the part that gives way when there is no room. The mark stays. */
+@media (max-width: 720px) {
+  .brand b {
+    display: none;
+  }
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  filter: drop-shadow(0 0 16px rgba(255, 178, 92, 0.5))
+    drop-shadow(0 0 34px rgba(90, 140, 255, 0.35));
+  animation: spin 90s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.brand b {
+  font: 300 17px/1 var(--display);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+@media (max-width: 640px) {
+  .brand b {
+    display: none;
+  }
+}
+
+/* The mark as a hero, on the first screen. */
+.mark-hero {
+  width: clamp(96px, 18vw, 150px);
+  height: clamp(96px, 18vw, 150px);
+  border-radius: 999px;
+  margin: 0 auto 26px;
+  display: block;
+  filter: drop-shadow(0 0 40px rgba(255, 178, 92, 0.45))
+    drop-shadow(0 0 90px rgba(90, 140, 255, 0.4));
+  animation: spin 120s linear infinite;
+}
+/*
+ * Reduced motion.
+ *
+ * The canvas already renders one static frame and never starts its loop, but that is only
+ * half the job — the progress sweep, the skeleton shimmer and the logo spin are CSS and keep
+ * running. This turns all of them off in one place, so the setting means what it says.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- top: context, not navigation ---- */
+
+.topbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px var(--pad);
+  padding-top: max(14px, env(safe-area-inset-top));
+}
+.topbar .who {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+@media (max-width: 640px) {
+  .topbar .who {
+    text-align: left;
+  }
+}
+.topbar .who b {
+  display: block;
+  font: 500 15px/1.3 var(--ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar .who span {
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.iconbtn {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  transition: border-color 0.15s, color 0.15s;
+}
+.iconbtn:hover {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  font: 600 14px/1 var(--mono);
+  color: var(--accent);
+}
+
+/* ---- funnel progress: the only navigation ---- */
+
+.steps {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  padding: 0 var(--pad) 10px;
+}
+.step {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(160, 180, 235, 0.16);
+  overflow: hidden;
+}
+.step i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width 0.5s ease;
+}
+.step.done i {
+  width: 100%;
+}
+.step.now i {
+  width: 100%;
+  animation: sweep 1.6s ease-in-out infinite alternate;
+}
+@keyframes sweep {
+  from {
+    opacity: 0.55;
+  }
+}
+
+/* ---- middle: the content ---- */
+
+.view {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px var(--pad) 28px;
+}
+/*
+ * `min-width: 0` is load-bearing.
+ *
+ * On a centred screen `.view` is a flex column, which makes this a flex item — and a flex
+ * item defaults to `min-width: auto`, meaning it refuses to shrink below the intrinsic width
+ * of its contents. A row of five cards is intrinsically about 1030px, so on a phone this box
+ * stayed 1030px wide and `.view` quietly scrolled it sideways.
+ *
+ * It never showed up in a document-overflow check, because the overflow was inside `.view`
+ * rather than on the page. The layout looked fine to every measurement and was cut off on
+ * every phone.
+ */
+.view-inner {
+  max-width: 1500px;
+  min-width: 0;
+  margin: 0 auto;
+}
+.view-inner.mid {
+  max-width: 640px;
+}
+
+/* An editor, not a document. The reading measure would waste half a desktop screen. */
+.view-inner.wide {
+  max-width: 1240px;
+}
+
+/* Centre a short screen instead of stranding it at the top. */
+.view.center {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ---- bottom: the one action, in the thumb zone ---- */
+
+.actionbar {
+  position: relative;
+  z-index: 3;
+  padding: 12px var(--pad);
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(5, 7, 16, 0), rgba(5, 7, 16, 0.92) 40%);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line);
+}
+.actionbar .why {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font: 400 13.5px/1.3 var(--ui);
+  color: var(--ink-3);
+}
+.actionbar .why b {
+  font: 600 14px/1 var(--mono);
+  color: var(--accent);
+}
+
+/* =================================================================  buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 52px;
+  padding: 0 22px;
+  border-radius: var(--r);
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font: 500 16px/1 var(--ui);
+  white-space: nowrap;
+  transition: transform 0.08s, border-color 0.15s, background 0.15s;
+}
+.btn:hover {
+  border-color: var(--line-2);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn.block {
+  width: 100%;
+}
+.btn.sm {
+  height: 40px;
+  padding: 0 14px;
+  font-size: 14.5px;
+  border-radius: 12px;
+}
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+  color: var(--accent-ink);
+  font-weight: 600;
+  box-shadow: 0 8px 30px -8px rgba(255, 138, 61, 0.6);
+}
+.btn.primary:hover {
+  filter: brightness(1.06);
+}
+.btn.primary:disabled {
+  background: var(--panel-solid);
+  color: var(--ink-4);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.btn.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
+}
+.btn.quiet:hover {
+  color: var(--ink);
+  background: rgba(160, 180, 235, 0.08);
+}
+
+/* ===================================================================  type */
+
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font: 500 11.5px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+.kicker::before {
+  content: '';
+  width: 20px;
+  height: 1px;
+  background: currentColor;
+}
+h1.big {
+  margin: 0;
+  font: 600 clamp(30px, 6.4vw, 54px) / 1.04 var(--display);
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.lede {
+  margin: 14px 0 0;
+  font: 400 clamp(15px, 1.4vw, 17px) / 1.6 var(--ui);
+  color: var(--ink-3);
+  max-width: 54ch;
+  text-wrap: pretty;
+}
+.hd {
+  margin-bottom: 26px;
+}
+
+/* ==============================================================  storyboard */
+
+/*
+ * The storyboard is a picker, not a list.
+ *
+ * The decision on this screen is "which of these is worth paying to finish", and that is a
+ * judgement about pictures. So the frames run large, the whole frame is the control, and the
+ * running cost sits in the action bar where the decision gets committed. Earlier versions put
+ * a button inside every row, which turned a visual judgement into form-filling.
+ *
+ * One column on a phone, then as many as fit. Portrait frames, because that is the shape
+ * these videos are actually published in.
+ */
+.frames {
+  /*
+   * Two-up on a phone. One frame per row fills the screen with a single scene, and picking
+   * is a comparison — you need to see several at once to judge which are worth finishing.
+   */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+@media (min-width: 900px) {
+  .frames {
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 16px;
+  }
+}
+
+.frame {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--bg-2);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  text-align: left;
+  transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+}
+.frame:hover {
+  transform: translateY(-3px);
+  border-color: var(--line-2);
+}
+.frame.sel {
+  border-color: var(--accent);
+  box-shadow: var(--shadow), 0 0 0 2px var(--accent);
+}
+.frame.final {
+  border-color: rgba(110, 231, 168, 0.5);
+}
+
+/* Legibility over imagery: text always sits on its own gradient, never raw on the frame. */
+.frame .veil {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 44px 12px 12px;
+  background: linear-gradient(180deg, transparent, rgba(4, 6, 14, 0.92) 62%);
+  /* Decorative: a gradient and the title text, no controls. It is painted over `.card-open`
+     — the full-bleed button that opens the project — and later in the DOM, so it was
+     swallowing every click in the bottom third of the card. That is the part with the title
+     on it, which is precisely where someone aims to open a video. */
+  pointer-events: none;
+}
+.frame .line {
+  margin: 0;
+  font: 500 14px/1.4 var(--ui);
+  color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.frame .tc {
+  display: block;
+  margin-top: 7px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.frame .idx {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(4, 6, 14, 0.66);
+  backdrop-filter: blur(8px);
+  font: 600 12px/1 var(--mono);
+}
+.frame .mark {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.42);
+  background: rgba(4, 6, 14, 0.5);
+  backdrop-filter: blur(8px);
+  color: transparent;
+}
+.frame.sel .mark {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.frame.final .mark {
+  border-color: var(--good);
+  background: var(--good);
+  color: #06301c;
+}
+
+.frame .tools {
+  position: absolute;
+  top: 44px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.frame:hover .tools,
+.frame:focus-within .tools {
+  opacity: 1;
+}
+.tool {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(4, 6, 14, 0.66);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.tool:hover {
+  background: rgba(4, 6, 14, 0.9);
+}
+
+.frame .working {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 7, 16, 0.66);
+  backdrop-filter: blur(3px);
+  font: 500 13px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.frame.skeleton {
+  background: linear-gradient(
+    100deg,
+    rgba(160, 180, 235, 0.05) 30%,
+    rgba(160, 180, 235, 0.13) 50%,
+    rgba(160, 180, 235, 0.05) 70%
+  );
+  background-size: 300% 100%;
+  animation: shim 1.4s linear infinite;
+}
+@keyframes shim {
+  to {
+    background-position: -150% 0;
+  }
+}
+
+.addframe {
+  aspect-ratio: 9 / 16;
+  border-radius: var(--r);
+  border: 1px dashed var(--line-2);
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  font: 500 14px/1 var(--ui);
+  transition: border-color 0.15s, color 0.15s;
+}
+.addframe:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ================================================================  composer */
+
+/*
+ * A row of chips, with room after it.
+ *
+ * The bottom margin is not decoration: a filter row that touches what it filters reads as
+ * part of it, and on the projects list the chips sat exactly on the first card's badge —
+ * measured gap, zero. One screen had already worked around this with an inline
+ * `marginBottom`, which is the tell that it belonged here.
+ */
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  margin-bottom: 16px;
+}
+.chip {
+  height: 38px;
+  padding: 0 15px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.05);
+  color: var(--ink-2);
+  font: 450 14px/1 var(--ui);
+  transition: border-color 0.15s, color 0.15s;
+}
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The one being filtered on. */
+.chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* The count beside the name: a fact about the list, not part of the label. */
+.chip small {
+  margin-inline-start: 6px;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+.chip[aria-pressed='true'] small {
+  color: var(--accent);
+}
+
+/* ==================================================================  sheets */
+
+/*
+ * Everything that is not the funnel — projects, identity, credits, account — opens as a
+ * sheet over the flow. It is a detour, not a destination, and it never becomes a permanent
+ * rail competing with the work.
+ */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(3, 4, 10, 0.62);
+  backdrop-filter: blur(6px);
+  animation: fade 0.18s ease;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+.sheet {
+  position: fixed;
+  z-index: 21;
+  inset: auto 0 0 0;
+  max-height: 88vh;
+  overflow-y: auto;
+  border-radius: 26px 26px 0 0;
+  border-top: 1px solid var(--line-2);
+  background: var(--bg-2);
+  box-shadow: 0 -30px 80px -20px rgba(0, 0, 0, 0.9);
+  padding: 10px var(--pad) max(24px, env(safe-area-inset-bottom));
+  animation: rise 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes rise {
+  from {
+    transform: translateY(6%);
+    opacity: 0;
+  }
+}
+.sheet .grab {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-2);
+  margin: 6px auto 18px;
+}
+@media (min-width: 760px) {
+  .sheet {
+    inset: 0 0 0 auto;
+    width: min(520px, 100%);
+    max-height: none;
+    border-radius: 0;
+    border-left: 1px solid var(--line-2);
+    border-top: 0;
+    padding-top: 26px;
+    animation: slide 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  @keyframes slide {
+    from {
+      transform: translateX(4%);
+      opacity: 0;
+    }
+  }
+  .sheet .grab {
+    display: none;
+  }
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 14px;
+  border-radius: 14px;
+  color: var(--ink-2);
+  font: 500 16px/1 var(--ui);
+  text-align: left;
+  transition: background 0.14s, color 0.14s;
+}
+.menu-item:hover {
+  background: rgba(160, 180, 235, 0.07);
+  color: var(--ink);
+}
+.menu-item svg {
+  color: var(--ink-3);
+  flex: none;
+}
+.menu-item .after {
+  margin-left: auto;
+  font: 500 13px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+/* ==================================================================  common */
+
+.card {
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+}
+.card.pad {
+  padding: 18px;
+}
+.card.lit {
+  border-color: rgba(255, 195, 107, 0.34);
+  background: linear-gradient(150deg, rgba(255, 170, 70, 0.1), var(--panel) 62%);
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.rowline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 15px 18px;
+  border-top: 1px solid var(--line);
+  font: 400 15px/1.4 var(--ui);
+}
+.rowline:first-child {
+  border-top: 0;
+}
+.muted {
+  color: var(--ink-3);
+}
+.label {
+  font: 500 11.5px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  margin-bottom: 12px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font: 600 11.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+  background: rgba(160, 180, 235, 0.08);
+}
+.tag.good {
+  color: var(--good);
+  border-color: rgba(110, 231, 168, 0.34);
+  background: rgba(110, 231, 168, 0.1);
+}
+.tag.hot {
+  color: var(--accent);
+  border-color: rgba(255, 195, 107, 0.34);
+  background: var(--accent-soft);
+}
+.meter {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(160, 180, 235, 0.16);
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width 0.45s ease;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 10px;
+}
+.tile {
+  padding: 16px 14px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: left;
+  transition: border-color 0.14s;
+}
+.tile:hover {
+  border-color: var(--line-2);
+}
+.tile[aria-pressed='true'] {
+  border-color: rgba(255, 195, 107, 0.5);
+  background: linear-gradient(150deg, rgba(255, 170, 70, 0.1), var(--panel) 70%);
+}
+.tile em {
+  display: block;
+  margin-top: 14px;
+  font: 500 13px/1 var(--ui);
+  font-style: normal;
+  color: var(--ink-3);
+}
+.tile[aria-pressed='true'] em {
+  color: var(--accent);
+}
+/* A project card holds buttons, so it is a div with an invisible open target behind them. */
+.card-project {
+  position: relative;
+}
+
+.card-project[data-busy='true'] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.card-open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.card-bin {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: rgba(6, 9, 20, 0.6);
+  color: var(--ink-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s, color 0.14s, border-color 0.14s;
+  backdrop-filter: blur(4px);
+}
+
+.card-project:hover .card-bin,
+.card-bin:focus-visible {
+  opacity: 1;
+}
+
+.card-bin:hover {
+  color: #ffb4a8;
+  border-color: rgba(255, 180, 168, 0.5);
+}
+
+/* Asked on the card, not in a modal: what is being confirmed is *which* one, and a dialog
+   takes that off screen at the moment it matters most. */
+.card-sure {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  border-radius: inherit;
+  background: rgba(6, 9, 20, 0.93);
+  backdrop-filter: blur(6px);
+}
+
+.card-sure b {
+  font: 550 15px/1.3 var(--ui);
+  color: var(--ink);
+}
+
+.card-sure small {
+  font: 400 12px/1.45 var(--ui);
+  color: var(--ink-4);
+}
+
+.card-sure span {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.card-sure button {
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font: 500 13px/1 var(--ui);
+  cursor: pointer;
+}
+
+.card-sure button[data-bad] {
+  border-color: rgba(255, 180, 168, 0.55);
+  background: rgba(255, 120, 100, 0.14);
+  color: #ffb4a8;
+}
+
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+/* ====================================================================  auth */
+
+/*
+ * Sign in / sign up.
+ *
+ * The credentials screen is the only one that appears before the product does, so it carries
+ * the mark at full size — it is the first and sometimes only chance to say what this is.
+ * One form, both modes: switching between them changes a heading and one field, so making
+ * them separate destinations would just cost the user a page load.
+ */
+.auth {
+  width: min(420px, 100%);
+  margin: 0 auto;
+  text-align: center;
+}
+.auth .mark-hero {
+  margin-bottom: 22px;
+}
+.auth h1 {
+  margin: 0;
+  font: 600 clamp(26px, 4.6vw, 34px) / 1.15 var(--display);
+  letter-spacing: -0.025em;
+}
+.auth .lede {
+  margin: 12px auto 30px;
+  text-align: center;
+}
+
+.field {
+  display: block;
+  text-align: left;
+  margin-bottom: 12px;
+}
+.field span {
+  display: block;
+  margin-bottom: 7px;
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.field textarea {
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 16px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 15.5px/1.5 var(--ui);
+  resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field textarea:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.field input {
+  width: 100%;
+  height: 52px;
+  padding: 0 16px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  color: var(--ink);
+  font: 400 16px/1 var(--ui);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field input::placeholder {
+  color: var(--ink-4);
+}
+.field input:focus {
+  outline: 0;
+  border-color: rgba(255, 195, 107, 0.55);
+  box-shadow: 0 0 0 4px rgba(255, 195, 107, 0.1);
+}
+
+.oauth {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 22px 0;
+  font: 500 11.5px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.swap {
+  margin-top: 22px;
+  font: 400 14.5px/1.6 var(--ui);
+  color: var(--ink-3);
+}
+.swap button {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fineprint {
+  margin: 18px auto 0;
+  max-width: 34ch;
+  font: 400 12.5px/1.6 var(--ui);
+  color: var(--ink-4);
+}
+
+/* ================================================================  profile */
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 26px;
+}
+.avatar {
+  width: 62px;
+  height: 62px;
+  flex: none;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font: 600 20px/1 var(--display);
+  color: #2a1206;
+  background: linear-gradient(140deg, #ffd08a, #ff7ab0);
+  box-shadow: 0 0 0 1px var(--line), 0 8px 26px -10px rgba(255, 138, 61, 0.6);
+}
+.profile-head b {
+  display: block;
+  font: 600 22px/1.2 var(--display);
+  letter-spacing: -0.02em;
+}
+.profile-head span {
+  font: 400 14px/1.4 var(--ui);
+  color: var(--ink-3);
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.stat {
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: center;
+}
+.stat b {
+  display: block;
+  font: 600 24px/1 var(--mono);
+  color: var(--ink);
+}
+.stat span {
+  display: block;
+  margin-top: 6px;
+  font: 500 11.5px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/* ==================================================================  script */
+
+/*
+ * Script Studio.
+ *
+ * The script is edited as beats rather than as one block of prose, because every downstream
+ * stage needs the parts: the hook decides retention, beat count decides scene count, and
+ * beat length decides voice timing and cost. Editing a paragraph gives none of that back.
+ */
+.beat {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.beat:first-child {
+  border-top: 0;
+}
+.beat-kind {
+  padding-top: 4px;
+}
+.beat-kind b {
+  display: block;
+  font: 600 12px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.beat.hook .beat-kind b {
+  color: var(--accent);
+}
+.beat-kind span {
+  display: block;
+  margin-top: 6px;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+.beat-kind span.over {
+  color: #ff9c8f;
+}
+
+.beat textarea {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(160, 180, 235, 0.04);
+  color: var(--ink);
+  font: 400 16px/1.6 var(--ui);
+  resize: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.beat textarea:hover {
+  background: rgba(160, 180, 235, 0.07);
+}
+.beat textarea:focus {
+  outline: 0;
+  border-color: rgba(255, 195, 107, 0.45);
+  background: var(--panel);
+}
+.beat.hook textarea {
+  font-size: 18px;
+  font-weight: 500;
+}
+/*
+ * The per-beat actions.
+ *
+ * Faded until the beat is pointed at or focused, so a long script is a script rather than a
+ * wall of buttons — but only where hovering is a thing the input can do. On a touch screen
+ * there is no hover, so the same rule would make every rewrite unreachable, and this is the
+ * screen `design-brief.md` calls the cheapest place to fix a video.
+ *
+ * `hover: hover` rather than a width query: it asks the actual question — can this pointer
+ * hover — instead of guessing from the size of the window.
+ */
+.beat-tools {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .beat-tools {
+    opacity: 0.25;
+    transition: opacity 0.15s;
+  }
+  .beat:hover .beat-tools,
+  .beat:focus-within .beat-tools {
+    opacity: 1;
+  }
+}
+.mini {
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  font: 500 12.5px/1 var(--ui);
+  transition: border-color 0.14s, color 0.14s;
+}
+.mini:hover {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+.mini.warn:hover {
+  border-color: rgba(255, 120, 100, 0.5);
+  color: #ff9c8f;
+}
+
+/* Running total: is the script the length the format needs? */
+.budget {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  margin-bottom: 20px;
+}
+.budget b {
+  font: 600 22px/1 var(--mono);
+  color: var(--accent);
+}
+.budget.over b {
+  color: #ff9c8f;
+}
+.budget .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Hook alternatives. */
+.hooks {
+  display: grid;
+  gap: 8px;
+}
+.hookopt {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  transition: border-color 0.14s, background 0.14s;
+}
+.hookopt:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.hookopt em {
+  font: 600 11px/1.4 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-style: normal;
+  color: var(--accent);
+}
+.hookopt span {
+  font: 400 15px/1.5 var(--ui);
+  color: var(--ink-2);
+}
+
+/* ==================================================  recipe picker + clips */
+
+.recipes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+}
+.recipe {
+  padding: 18px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: left;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.recipe:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-2);
+}
+.recipe[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: linear-gradient(150deg, rgba(255, 170, 70, 0.1), var(--panel) 66%);
+}
+.recipe b {
+  display: block;
+  font: 600 17px/1.3 var(--display);
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+.recipe p {
+  margin: 0 0 14px;
+  font: 400 14px/1.5 var(--ui);
+  color: var(--ink-3);
+}
+.recipe .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.clip {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+.clip:first-child {
+  border-top: 0;
+}
+.clip .score {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  font: 600 15px/1 var(--mono);
+  border: 1px solid var(--line);
+}
+.clip .score.hot {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.clip .at {
+  font: 500 12px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+/* ==================================================  scene detail + jobs */
+
+.detail {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 900px) {
+  .detail {
+    grid-template-columns: 300px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.detail .preview {
+  aspect-ratio: 9 / 16;
+  border-radius: var(--r);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  position: relative;
+}
+.pane {
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 16px 18px;
+}
+.pane + .pane {
+  margin-top: 12px;
+}
+.pane h3 {
+  margin: 0 0 4px;
+  font: 600 14px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pane .hint {
+  margin: 0 0 12px;
+  font: 400 13.5px/1.5 var(--ui);
+  color: var(--ink-4);
+}
+.pane textarea,
+.pane input[type='text'] {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.04);
+  color: var(--ink);
+  font: 400 15px/1.6 var(--ui);
+  padding: 10px 12px;
+  resize: vertical;
+}
+.pane textarea:focus,
+.pane input:focus {
+  outline: 0;
+  border-color: rgba(255, 195, 107, 0.45);
+}
+
+/* Word-by-word caption timing. Alignment gets words wrong; fixing it must not re-render. */
+.words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.word {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.05);
+  font: 450 14px/1 var(--ui);
+  color: var(--ink-2);
+}
+.word[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.word small {
+  display: block;
+  margin-top: 4px;
+  font: 500 10px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+.slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+.job:first-child {
+  border-top: 0;
+}
+.job .grow {
+  flex: 1;
+  min-width: 0;
+}
+.job b {
+  display: block;
+  font: 500 14.5px/1.3 var(--ui);
+}
+.job span {
+  font: 500 12px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+/* ==============================================================  visual UI */
+
+/*
+ * Recipe cards, led by a picture.
+ *
+ * The card shows what you give and what you get before it says anything. Someone who reads
+ * the interface language poorly can still pick correctly, which on a product aimed at
+ * creators across a dozen languages is not a nicety.
+ */
+.recipe-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: left;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+}
+.recipe-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-2);
+}
+.recipe-card[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: linear-gradient(150deg, rgba(255, 170, 70, 0.1), var(--panel) 68%);
+}
+.recipe-art {
+  padding: 10px 6px;
+  border-radius: 12px;
+  background: rgba(160, 180, 235, 0.05);
+}
+.recipe-card b {
+  font: 600 16px/1.3 var(--display);
+  letter-spacing: -0.01em;
+}
+.recipe-card p {
+  margin: 0;
+  font: 400 13.5px/1.5 var(--ui);
+  color: var(--ink-3);
+}
+.recipe-card .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+}
+
+/*
+ * The pipeline strip.
+ *
+ * Seven icons for the seven stages, lit as each one completes. It answers "what is it doing
+ * and how far along" without a sentence — which matters because jobs run for minutes and the
+ * usual alternative is a spinner that says nothing.
+ */
+.pipeline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.pipe-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-4);
+  transition: color 0.2s;
+}
+.pipe-step .dot {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.05);
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.pipe-step small {
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.pipe-step[data-state='done'] {
+  color: var(--good);
+}
+.pipe-step[data-state='done'] .dot {
+  border-color: rgba(110, 231, 168, 0.4);
+  background: rgba(110, 231, 168, 0.12);
+}
+.pipe-step[data-state='now'] {
+  color: var(--accent);
+}
+.pipe-step[data-state='now'] .dot {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: throb 1.4s ease-in-out infinite;
+}
+@keyframes throb {
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 195, 107, 0.08);
+  }
+}
+.pipe-link {
+  flex: none;
+  width: 10px;
+  height: 1px;
+  background: var(--line-2);
+}
+
+/* Numbers read across languages; words do not. Pair them with an icon, never a label. */
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.06);
+  font: 600 13px/1 var(--mono);
+  color: var(--ink-2);
+}
+.stat-chip svg {
+  color: var(--ink-4);
+}
+.stat-chip.hot {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.stat-chip.hot svg {
+  color: var(--accent);
+}
+
+/* Menu entries get a real icon tile, not a glyph beside a word. */
+.menu-item .tile-icon {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.06);
+  color: var(--ink-2);
+}
+.menu-item:hover .tile-icon {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+/* =============================================================  start: drop */
+
+.drop {
+  position: relative;
+  border-radius: var(--r-lg);
+  border: 1.5px dashed var(--line-2);
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  transition: border-color 0.16s, background 0.16s;
+}
+.drop[data-over='true'] {
+  border-color: var(--accent);
+  background: linear-gradient(150deg, rgba(255, 170, 70, 0.12), var(--panel) 66%);
+}
+.drop:focus-within {
+  border-style: solid;
+  border-color: rgba(255, 195, 107, 0.5);
+}
+.drop textarea {
+  width: 100%;
+  min-height: 108px;
+  padding: 18px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font: 400 17px/1.6 var(--ui);
+}
+.drop textarea::placeholder {
+  color: var(--ink-4);
+}
+.drop .tools {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+/* What the system thinks it received. Stated back so a wrong guess is visible. */
+.reading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border-top: 1px dashed var(--line);
+  font: 450 14.5px/1.45 var(--ui);
+  color: var(--ink-2);
+}
+.reading .badge-in {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/*
+ * The same row, when something went wrong.
+ *
+ * Red on its own is not a message — the sentence next to it is, and it is the server's own
+ * wording. This only recolours the frame so the row reads as a problem at a glance.
+ */
+.reading[data-bad] {
+  color: var(--bad-ink, #ffb4a8);
+}
+.reading[data-bad] .badge-in {
+  border-color: color-mix(in oklab, #ff6b57 42%, transparent);
+  background: color-mix(in oklab, #ff6b57 14%, transparent);
+  color: #ff9382;
+}
+
+/*
+ * The five tasks, always on screen.
+ *
+ * This is the concession to the fact that the tasks genuinely are different: someone who
+ * already knows they want subtitles should not have to describe anything first. It is a row
+ * of pictures rather than a menu of words, so it informs without demanding a diagnosis —
+ * and it is below the input, not above it, so the default path stays "just tell me".
+ */
+.tasks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(104px, 100%), 1fr));
+  gap: 8px;
+}
+.task {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(160, 180, 235, 0.04);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.task:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.task svg {
+  width: 100%;
+  height: auto;
+}
+.recipe-art svg,
+.task svg {
+  aspect-ratio: 132 / 60;
+}
+.task small {
+  font: 500 12px/1.25 var(--ui);
+  color: var(--ink-3);
+  text-align: center;
+}
+.task:hover small {
+  color: var(--ink);
+}
+
+
+/*
+ * An auth failure the person can act on.
+ *
+ * Sits under the form rather than replacing it: whatever they typed is still there, and
+ * "there is already an account with that email" is a sentence they respond to by pressing the
+ * other button — not by starting again.
+ */
+.fineprint[data-bad] {
+  color: #ff9382;
+}
+.field .hint {
+  display: block;
+  margin-top: 6px;
+  font: 400 12.5px/1.4 var(--ui);
+  color: var(--ink-3);
+}
+
+
+/* The action bar, when the thing you pressed costs more than you have. */
+.why[data-bad='true'] span {
+  color: #ff9382;
+}
+
+
+/* A tile that is not ready. Legible, but plainly not a thing to press. */
+.tile:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+/*
+ * A button that cannot be pressed must look like one.
+ *
+ * Without this the disabled OAuth buttons were indistinguishable from working ones, so the
+ * only way to discover they are not wired yet was to press them and watch nothing happen —
+ * which reads as a broken sign-in, not as a feature that has not shipped.
+ */
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+
+/*
+ * "not set up", on a provider this deployment cannot use.
+ *
+ * Inside the button rather than beside it: the reason belongs to the thing that is off, and
+ * a separate note underneath three buttons cannot say which one it means.
+ */
+.oauth .off {
+  margin-inline-start: auto;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-style: normal;
+}
+
+/*
+ * The video screen: stage, transport, scene strip, editor.
+ *
+ * The stage is 9:16 because that is what is being made. Letting it fill the width on a
+ * desktop would show a tall video in a short box with bars down both sides, so it is capped
+ * by height and centred — the shape of the thing is part of judging it.
+ */
+.player {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.stage {
+  position: relative;
+  /*
+   * A definite height, and the width follows from the aspect ratio.
+   *
+   * `max-height` alone does not do it: with `width: auto` the box has nothing to resolve
+   * against and collapses to zero — which renders as no player at all, just the page
+   * background where the video should be.
+   */
+  height: min(58vh, 520px);
+  aspect-ratio: 9 / 16;
+  width: auto;
+  margin-inline: auto;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #06080f;
+  display: grid;
+  place-items: center;
+}
+.stage-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #06080f;
+}
+.stage-still {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+/* An empty stage says so rather than showing a black rectangle that reads as a broken player. */
+.stage[data-empty='true'] .stage-still {
+  background: linear-gradient(150deg, #1b2350, #0b0f22 72%);
+}
+/*
+ * The caption, where the render burns it in.
+ *
+ * Same position and same plate as `execution/compose/captions.py` uses, so what is read here
+ * is where it will be read on the phone. If those two drift, this screen is lying.
+ */
+.stage-caption {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 14%;
+  text-align: center;
+  background: var(--accent);
+  color: #1d1204;
+  padding: 0.28em 0.5em;
+  border-radius: 0.22em;
+  font: 800 clamp(15px, 2.6vw, 21px) / 1.35 var(--ui);
+  letter-spacing: -0.01em;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 2px;
+}
+.transport .tc {
+  font: 500 12.5px/1 var(--mono);
+  color: var(--ink-3);
+}
+
+/*
+ * The scene strip.
+ *
+ * One cell per scene, and each grows in proportion to how long it is on screen — a scene that
+ * runs twice as long looks twice as wide. That is the one thing a timeline told you that is
+ * worth keeping, without asking anyone to think in frames.
+ */
+.strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 18px;
+  scrollbar-width: thin;
+}
+.strip-cell {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 68px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.14s, transform 0.14s;
+}
+.strip-cell:hover {
+  border-color: var(--line-2);
+}
+.strip-cell[aria-selected='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.strip-thumb {
+  display: block;
+  height: 54px;
+  background: linear-gradient(150deg, #1b2350, #0b0f22 72%);
+  background-size: cover;
+  background-position: center;
+}
+.strip-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  font: 500 11px/1 var(--mono);
+  color: var(--ink-3);
+}
+.strip-meta b {
+  color: var(--ink-2);
+}
+.strip-flag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--good);
+  color: #05210f;
+}
+
+/* Edits the strip's selection, and nothing else. */
+.editor {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--panel);
+}
+.editor .hint {
+  margin: 8px 0 0;
+  font: 400 13px/1.45 var(--ui);
+  color: var(--ink-3);
+}
+
+
+/* The task that has been chosen while the input is still empty. */
+
+
+/*
+ * Named for assistive technology, not shown.
+ *
+ * Every screen needs a heading someone can identify it by, but the video screen's subject is
+ * the video — a visible title would repeat the topbar and push the player down. Clipped
+ * rather than `display:none`, which would take it out of the accessibility tree too.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+
+/*
+ * The five lanes, as the first decision on the Start screen.
+ *
+ * Large enough to be the subject of the screen rather than a footnote under a text box. Each
+ * carries its diagram, its name and one line — the diagram does the work in any language, the
+ * line is there for whoever wants it.
+ */
+/*
+ * The five tasks.
+ *
+ * Explicit column counts, not `auto-fit`.
+ *
+ * `repeat(auto-fit, minmax(196px, 1fr))` looks like it wraps and does not: a fixed track floor
+ * makes the grid's own min-content five tracks wide (~780px), so inside a scrolling panel it
+ * stayed that wide on a phone and was clipped sideways. `min(196px, 100%)` did not help —
+ * during intrinsic sizing the percentage has nothing definite to resolve against.
+ *
+ * Counting columns per breakpoint is duller and it is verifiable, which is what this needs to
+ * be: the bug was invisible to every overflow check because the overflow was inside the panel
+ * rather than on the page.
+ */
+.lanes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  max-width: 1120px;
+  margin: 0 auto 22px;
+  /* Equal heights. Without it the card with the longest line sets its row and the others
+     float, which reads as five cards of five different importances. */
+  align-items: stretch;
+}
+@media (max-width: 1080px) {
+  .lanes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 440px) {
+  .lanes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.lane {
+  align-content: start;
+}
+.lane {
+  display: grid;
+  gap: 9px;
+  justify-items: start;
+  text-align: left;
+  padding: 20px 18px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+.lane:hover {
+  border-color: var(--line-2);
+}
+.lane-art {
+  display: block;
+  width: 108px;
+  max-width: 100%;
+}
+.lane b {
+  font: 600 15.5px/1.25 var(--display);
+  color: var(--ink);
+}
+.lane small {
+  font: 400 12.5px/1.45 var(--ui);
+  color: var(--ink-3);
+}
+.lane[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.lane[aria-checked='true'] b {
+  color: var(--accent);
+}
+
+/*
+ * Step 2: what it is about, and what to build it from.
+ *
+ * Two fields, not one. The attach control used to be a small chip inside the text box's
+ * outline, so a file — which for Subtitle or Clip is the *entire* input — looked like an
+ * afterthought to the typing. They are separate questions and now look like it.
+ */
+/* Solid once something is in it: a dashed outline means "drop here", and it is done. */
+/* Bigger when it is the question, not a footnote to one. */
+/* What was attached, shown rather than named. */
+/*
+ * The composer — one box that takes the words and the picture.
+ *
+ * Previously a textarea and a large dashed panel stacked vertically, which read as two
+ * required steps when only one of them was, and on a phone pushed the primary button below
+ * the fold. The card owns the border; the textarea inside it is chromeless.
+ */
+.composer {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.composer:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.composer[data-over='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* File-first tasks lead with a target big enough to drop on. */
+.composer[data-lead='true'] .composer-drop,
+.composer[data-lead='true'] .source {
+  border-bottom: 1px solid var(--line);
+}
+
+.composer-text {
+  display: block;
+  width: 100%;
+  padding: 16px 18px 12px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 400 16px/1.55 var(--ui);
+  /* No grip: it rendered mid-card, above the attach row, and dragging it broke the card. */
+  resize: none;
+}
+
+.composer-text:focus {
+  outline: none;
+}
+
+.composer-text::placeholder {
+  color: var(--ink-4);
+}
+
+.composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px 12px 14px;
+}
+
+.composer-foot small {
+  font: 400 12.5px/1.4 var(--ui);
+  color: var(--ink-4);
+  min-width: 0;
+}
+
+.composer-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--ink-3);
+  font: 500 13px/1 var(--ui);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s;
+}
+
+.composer-attach:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+.composer-attach:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.composer-drop {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 40px 20px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+.composer-drop b {
+  font: 550 17px/1.35 var(--ui);
+  color: var(--ink);
+}
+
+.composer-drop small {
+  font: 400 13px/1.4 var(--ui);
+  color: var(--ink-4);
+}
+
+.composer-mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 8px;
+  border-radius: 15px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Dividers only between things that are actually stacked. */
+.composer .attached + .composer-text,
+.composer .attached + .composer-words,
+.composer .composer-words + .composer-text {
+  border-top: 1px solid var(--line);
+}
+
+.attached {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+}
+.thumb {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #0b0f22;
+  border: 1px solid var(--line);
+}
+.thumb-none {
+  display: grid;
+  place-items: center;
+  color: var(--ink-4);
+}
+.attached-what {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.attached-what b {
+  font: 500 14.5px/1.35 var(--ui);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attached-what span {
+  font: 500 12px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+/*
+ * Step 2's heading, with the task's diagram beside it.
+ *
+ * The same picture that was pressed on the previous screen, so this reads as a continuation
+ * of that choice rather than a form that appeared from nowhere.
+ */
+.brief-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+}
+.brief-art {
+  display: block;
+  width: 116px;
+  flex: none;
+  margin-top: 6px;
+}
+.brief-steps {
+  margin: 4px 0 20px;
+}
+@media (max-width: 640px) {
+  .brief-art {
+    display: none;
+  }
+}
+
+/* Carry on from something already made. */
+.series-row {
+  /*
+   * A grid, not a scrolling row.
+   *
+   * `overflow-x: auto` on four items drew a full-width native scrollbar under them — on
+   * Windows a permanent light-grey bar wider than the gap between the cards, and the loudest
+   * thing on the screen. Four fit in two rows with no scrolling at all. Explicit column
+   * counts rather than auto-fit: a `minmax(Npx, 1fr)` track has a hard floor, so the grid
+   * keeps an N-times-columns minimum width and silently overflows its panel on a phone.
+   */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .series-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.series-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  padding: 8px 12px 8px 8px;
+  text-align: start;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s;
+}
+
+.series-card:hover {
+  border-color: var(--accent-line);
+}
+
+.series-card[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 3:4, so it reads as a frame of a vertical video rather than an avatar. */
+.series-poster {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 42px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #0b0f22;
+  color: var(--ink-4);
+}
+
+.series-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.series-poster svg {
+  width: 30px;
+  height: auto;
+  opacity: 0.6;
+}
+
+.series-what {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.series-what b {
+  font: 500 13.5px/1.35 var(--ui);
+  color: var(--ink-2);
+  /* Two lines then ellipsis: one line cut every title at the same uninformative point. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.series-card[data-on='true'] .series-what b {
+  color: var(--ink);
+}
+
+.series-what small {
+  font: 500 11px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+.series-tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* The words the creator already has, sitting inside the composer under the video. */
+.composer-words {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 12px 12px 14px;
+}
+
+.composer-words small {
+  font: 400 12.5px/1.4 var(--ui);
+  color: var(--ink-4);
+  min-width: 0;
+}
+
+/* When the server cannot listen this is not optional, and it should not look it. */
+.composer-words[data-needed='true'][data-has='false'] small {
+  color: var(--accent);
+}
+
+.composer-words-what {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-words-what b {
+  font: 500 13.5px/1.35 var(--ui);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-words-what span {
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+/* Spoken in -> subtitles in. One row, because it is one decision. */
+.langs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.langs-arrow {
+  padding-bottom: 11px;
+  color: var(--ink-4);
+  font: 400 16px/1 var(--ui);
+}
+
+@media (max-width: 560px) {
+  /* Stacked, with the arrow turned to match the reading direction. */
+  .langs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .langs-arrow {
+    display: none;
+  }
+}
+
+.lang {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lang > span {
+  font: 500 11px/1 var(--mono);
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.lang select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  /* Headroom for the scripts that stack. Burmese and Thai put medials, tone marks and the
+     asat above and below the base — the packs ask for 1.75 line height for exactly this
+     reason — and a native select will not grow its line box to fit. The control's height
+     comes from its padding, so the taller line costs nothing on Latin and leaves the marks
+     somewhere to go in the one picker a Burmese creator has to read. */
+  font: 500 14px/1.75 var(--ui);
+  cursor: pointer;
+  transition: border-color 0.14s;
+}
+
+.lang select:hover {
+  border-color: var(--accent-line);
+}
+
+.lang select:focus-visible {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+
+/*
+ * The subtitle editor.
+ *
+ * A working surface: it fills the window, the video is the largest thing on it, and the only
+ * thing that scrolls is the list of lines. Built as an article it left the video at 380px on a
+ * wide monitor with a third of the page empty, five cues visible at a time, and two scrollbars.
+ */
+.view.full {
+  overflow: hidden;
+  padding: 0;
+}
+
+.view-inner.full {
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * A column, not a two-row grid.
+ *
+ * The grid named exactly two rows and the screen has four children — two header rows, an
+ * error that comes and goes, and the body. The `1fr` landed on whichever child happened to be
+ * second, so the toolbar claimed the height and the editor underneath was squashed to its
+ * content. A column says the thing that is actually true: everything is its own height except
+ * the body, which takes the rest.
+ */
+.ed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ed > .ed-main {
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * The header, in two rows.
+ *
+ * What this is and how far along it is on top; what you press underneath. One row held eleven
+ * controls and wrapped, and giving the pipeline a row of its own left it stranded at a third
+ * of the page beside empty space.
+ */
+/*
+ * Three columns so the middle one is genuinely centred.
+ *
+ * `space-between` centres nothing: it puts the strip wherever the title's width leaves it, so
+ * it drifts as the line count changes. The empty third column is what makes the middle the
+ * middle of the *screen* rather than the middle of what is left over.
+ */
+.ed-top {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 24px;
+  padding: 12px var(--pad) 0;
+}
+
+/*
+ * The header is a surface, not two rows floating on the starfield.
+ *
+ * Without a ground of its own the controls read as scattered over the video behind them,
+ * which is most of what made the placement look accidental.
+ */
+.ed-top,
+.ed-bar {
+  background: rgba(7, 10, 22, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+/*
+ * A *definite* width, not a maximum.
+ *
+ * The steps inside are `flex: 1` with `min-width: 0`, so their intrinsic contribution collapses
+ * to almost nothing: in an auto-width parent the strip shrinks to a stub and the labels
+ * truncate to "TAKE…" and "LIST…". It works on the other screens only because a 640px column
+ * gives it a width to divide. Here it has to be told one.
+ */
+.ed-flow {
+  flex: none;
+  width: clamp(300px, 32vw, 560px);
+}
+
+/*
+ * The controls, grouped.
+ *
+ * Ordered by what they change: where it goes, how it looks, what it says, when it says it.
+ * The rules between the groups are what stop eleven buttons reading as one undifferentiated
+ * row — they cost nothing and do the whole job.
+ */
+.ed-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px var(--pad) 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ed-bar > * + .ed-size,
+.ed-bar > * + .ed-styles,
+.ed-bar > * + .ref-pick,
+.ed-bar > * + .ed-gloss,
+.ed-bar > * + .ed-shift {
+  padding-inline-start: 14px;
+  border-inline-start: 1px solid var(--line);
+}
+
+/*
+ * Kept with the others rather than pushed to the far end.
+ *
+ * The header spans both columns, so `margin-inline-start: auto` threw it clear across the
+ * page and left it hovering over the caption list — related to nothing near it. The rule to
+ * its left already says it is a separate group; that is enough.
+ */
+
+@media (max-width: 1100px) {
+  /* Wrapped, the rules land mid-row and read as debris. */
+  .ed-bar > * + * {
+    padding-inline-start: 0;
+    border-inline-start: none;
+  }
+
+  .ed-flow {
+    display: none;
+  }
+}
+
+.ed-what {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ed-what b {
+  font: 600 15px/1.2 var(--ui);
+  color: var(--ink);
+}
+
+.ed-what span {
+  font: 500 12px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+/* Each swatch drawn in the style it selects — three names cannot be compared. */
+.ed-styles,
+.ed-shift {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.ed-shift small {
+  font: 500 10.5px/1 var(--mono);
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-inline-end: 2px;
+}
+
+.ed-styles button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 32px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #0b0f1e;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.ed-styles button[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.ed-styles em {
+  font-style: normal;
+  transform: scale(0.72);
+}
+
+.ed-shift button {
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  font: 500 12px/1 var(--mono);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s;
+}
+
+.ed-shift button:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+/*
+ * Video and lines, side by side, both filling the height.
+ *
+ * The video gets the larger share: it is what is being checked, and at 380px it was the
+ * smallest thing on a screen devoted to watching it.
+ */
+.ed-main {
+  display: grid;
+  /*
+   * The list is sized to what it holds; the video takes everything else.
+   *
+   * A proportional split left the rows capped at their readable width with dead panel to the
+   * right of them, while the video — the thing being checked — was smaller than it needed to
+   * be on a wide monitor.
+   */
+  grid-template-columns: minmax(0, 1fr) clamp(400px, 42%, 812px);
+  gap: 0;
+  min-height: 0;
+}
+
+.ed-stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px var(--pad) 16px;
+}
+
+/*
+ * The frame the video will be *exported* as, not the shape it was uploaded in.
+ *
+ * `container-type: size` plus `cqmin` on the caption is what makes this honest: `1cqmin` is
+ * 1% of the frame's smaller side, which is exactly the dimension the rasterizer sizes from.
+ * The caption on this preview is therefore the caption that burns in, at any preview size,
+ * with nothing measured in JavaScript and nothing to drift.
+ */
+.ed-video {
+  /* As tall as the stage row actually offers: the vertical frame is the one that
+     needs it, and it was leaving most of a wide column empty. */
+  --out-h: min(64vh, 640px);
+  container-type: size;
+  position: relative;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  align-self: center;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: #05070f;
+  aspect-ratio: 9 / 16;
+  max-width: min(100%, calc(var(--out-h) * 9 / 16));
+  /*
+   * Capped by the row as well as by the viewport.
+   *
+   * `--out-h` alone is a promise about the window, not about the space this row was actually
+   * given — so on a short window the frame grew past its row and sat on top of the play button
+   * and the clock underneath it. `100%` is the row; whichever is smaller wins.
+   */
+  max-height: min(var(--out-h), 100%);
+}
+
+.ed-video[data-shape='1:1'] {
+  aspect-ratio: 1;
+  max-width: min(100%, var(--out-h));
+}
+
+.ed-video[data-shape='16:9'] {
+  aspect-ratio: 16 / 9;
+  max-width: min(100%, calc(var(--out-h) * 16 / 9));
+}
+
+/* `cover`, because ffmpeg crops to fill rather than letterboxing — bars on a Short read as
+   reposted content, and every platform's algorithm treats them accordingly. Previewing with
+   `contain` showed a frame the export never produces. */
+.ed-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ed-novideo {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--ink-4);
+  font: 400 13.5px/1.4 var(--ui);
+  text-align: center;
+}
+
+/*
+ * The caption block, where the renderer will put it — and draggable.
+ *
+ * `bottom` is set inline from the identity kit, as a share of the frame, matching what the
+ * rasterizer does. Grab area is the block itself; the cursor and the outline on hover are the
+ * only affordance it needs, because a caption you can move is a caption you will try to move.
+ */
+.ed-place {
+  position: absolute;
+  inset-inline: 8%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+  outline: 1px dashed transparent;
+  outline-offset: 3px;
+  transition: outline-color 0.14s;
+}
+
+.ed-place:hover,
+.ed-place:focus-visible {
+  outline-color: rgba(255, 195, 107, 0.55);
+}
+
+.ed-place[data-dragging='true'] {
+  cursor: grabbing;
+  outline-color: var(--accent);
+}
+
+/* Nothing on screen at this moment, but the control must still be findable. */
+.ed-place[data-empty='true'] {
+  min-height: 30px;
+  justify-content: center;
+}
+
+.ed-place-ghost {
+  font: 500 11px/1 var(--mono);
+  color: rgba(255, 255, 255, 0.34);
+  opacity: 0;
+  transition: opacity 0.14s;
+  white-space: nowrap;
+}
+
+.ed-place:hover .ed-place-ghost,
+.ed-place[data-dragging='true'] .ed-place-ghost {
+  opacity: 1;
+}
+
+.ed-caption {
+  max-width: 100%;
+  text-align: center;
+  pointer-events: none;
+  /* 5% of the frame's short edge, times the creator's scale — the rasterizer's formula. */
+  font-size: calc(5cqmin * var(--cap, 1));
+  /* From the language pack, like the size. The styles were authored with `/1`, which drew a
+     wrapped caption's second line on top of its first. */
+  line-height: var(--lead, 1.4);
+}
+
+.ed-caption[data-sub='true'] {
+  font-size: calc(3.7cqmin * var(--cap, 1));
+}
+
+/* A secondary track is a translation of the line above it: smaller and quieter, so the eye
+   knows which one it is reading. Matches what the rasterizer draws. */
+.ed-caption[data-sub='true'] {
+  font-size: 0.74em;
+  opacity: 0.88;
+}
+
+/* Which languages burn in. */
+.ed-error {
+  margin: 0;
+  padding: 9px var(--pad);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 120, 100, 0.09);
+  color: #ffb4a8;
+  font: 400 13px/1.45 var(--ui);
+}
+
+/* The same message outside the editor, where there is no toolbar edge for it to sit against. */
+.ed-error[data-inline='true'] {
+  margin: 0 0 16px;
+  padding: 10px 13px;
+  border: 1px solid rgba(255, 120, 100, 0.3);
+  border-radius: var(--r);
+}
+
+.ed-tracks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  flex-wrap: wrap;
+}
+
+.ed-tracks small,
+.ed-tracks em {
+  font: 500 10.5px/1 var(--mono);
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-style: normal;
+}
+
+.ed-tracks button {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-4);
+  font: 500 12.5px/1 var(--ui);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+
+.ed-tracks button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+.ed-tracks button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The language it was said in. On, and not removable — there would be nothing to translate. */
+.ed-tracks button[data-primary='true'] {
+  color: var(--ink);
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ed-tracks button:disabled {
+  cursor: default;
+}
+
+/* One text box per burnt-in language. */
+/* Words to leave untranslated. */
+.ed-gloss {
+  position: relative;
+  flex: none;
+}
+
+.ed-gloss-open {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  font: 500 12px/1 var(--ui);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s;
+}
+
+.ed-gloss-open:hover,
+.ed-gloss-open[aria-expanded='true'] {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+.ed-gloss-panel {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0a0d1c;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+.ed-gloss-panel p {
+  margin: 0 0 12px;
+  font: 400 12.5px/1.55 var(--ui);
+  color: var(--ink-4);
+}
+
+.ed-gloss-panel p b {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.ed-gloss-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ed-gloss-terms em {
+  font: 400 12.5px/1 var(--ui);
+  color: var(--ink-4);
+  font-style: normal;
+}
+
+.ed-gloss-terms > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 5px 5px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-2);
+  font: 500 12.5px/1 var(--ui);
+}
+
+.ed-gloss-terms > span button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.ed-gloss-terms > span button:hover {
+  color: #ffb4a8;
+}
+
+.ed-gloss-add {
+  display: flex;
+  gap: 6px;
+}
+
+.ed-gloss-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: 400 13px/1.3 var(--ui);
+}
+
+.ed-gloss-add input:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
+.ed-gloss-add button {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  font: 500 12.5px/1 var(--ui);
+  cursor: pointer;
+}
+
+.ed-gloss-add button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Offered where the problem is noticed: on the word, in the line being read. */
+.ed-keep {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px dashed var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 500 11.5px/1.3 var(--ui);
+  cursor: pointer;
+}
+
+
+.ed-cue-lines {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ed-cue-lines textarea[data-sub='true'] {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+
+.ed-transport {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ed-play {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s;
+}
+
+.ed-play:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ed-scrub {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  align-items: center;
+}
+
+.ed-scrub input[type='range'] {
+  width: 100%;
+  margin: 0;
+  position: relative;
+  z-index: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Where the cues are, as a map of the track: a long silent stretch is visible without
+   playing a second of it. */
+.ed-ticks {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 1px;
+  height: 4px;
+  pointer-events: none;
+}
+
+.ed-ticks i {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--ink-4);
+  opacity: 0.55;
+}
+
+.ed-ticks i[data-live='true'] {
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* Export shape, and caption size. */
+/*
+ * The pipeline, at toolbar scale.
+ *
+ * The same component the Brief and Confirm screens use, shrunk to sit in a working screen's
+ * chrome rather than to be the content of one — the dots carry the state, and at this size
+ * position is enough to read them by.
+ */
+/* The pipeline row, matching `.brief-steps` on the screens before this one. */
+.ed-shapes,
+.ed-size {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ed-size button {
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-4);
+  font: 500 11.5px/1 var(--mono);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+
+.ed-size button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+/* Named by where it is going, with the ratio underneath for the people who want it. */
+.ed-shapes button {
+  display: grid;
+  gap: 1px;
+  justify-items: center;
+  padding: 4px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s;
+}
+
+.ed-shapes button b {
+  font: 500 12.5px/1.2 var(--ui);
+  color: var(--ink-3);
+}
+
+.ed-shapes button small {
+  font: 500 9.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+.ed-shapes button:hover {
+  border-color: var(--accent-line);
+}
+
+.ed-shapes button:hover b {
+  color: var(--ink);
+}
+
+.ed-shapes button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ed-shapes button[aria-pressed='true'] b {
+  color: var(--accent);
+}
+
+.ed-size button {
+  width: 30px;
+  font-family: var(--ui);
+}
+
+.ed-size button:first-child {
+  font-size: 11px;
+}
+
+.ed-size button:last-child {
+  font-size: 16px;
+}
+
+.ed-size button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/*
+ * The timeline. Every cue is a block you drag rather than a number you type.
+ *
+ * Tall enough to grab on a phone: the edges are 10px targets, which is the smallest a drag
+ * handle can be and still be hit with a thumb.
+ */
+/* The timeline and its zoom, side by side. */
+.ed-timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+/*
+ * The window onto the timeline.
+ *
+ * The track itself grows past this when zoomed; this is what scrolls. Separated so the zoom
+ * buttons can sit still while the track moves under them.
+ */
+.ed-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.ed-track {
+  position: relative;
+  min-width: 100%;
+  height: 62px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  /* A shallow well the blocks sit in, lit from the top like everything else in the app. */
+  /* Opaque enough that the starfield behind it does not compete with the blocks. A planet
+     drifting through the timeline is a lovely thing that makes cue six hard to find. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 42%),
+    rgba(7, 10, 22, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* It scrubs as well as seeks, and the cursor is the only thing that says so before you
+     press. `pointer` reads as "this is a button", which it is not. */
+  cursor: ew-resize;
+  touch-action: none;
+  overflow: hidden;
+}
+
+/*
+ * The scale.
+ *
+ * Occupies the bottom strip so the blocks keep the top. Labels sit to the right of their tick
+ * and the first one is nudged clear of the rounded corner, which is the only special case a
+ * ruler like this needs.
+ */
+.ed-ruler {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 17px;
+  pointer-events: none;
+}
+
+.ed-ruler i {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  border-inline-start: 1px solid rgba(150, 170, 230, 0.16);
+}
+
+.ed-ruler b {
+  position: absolute;
+  bottom: 2px;
+  inset-inline-start: 4px;
+  font: 500 9px/1 var(--mono);
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.ed-block {
+  container: ed-cue / inline-size;
+  position: absolute;
+  top: 15px;
+  /* Stops above the ruler rather than covering it. */
+  bottom: 21px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  min-width: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-line);
+  background: linear-gradient(180deg, rgba(255, 195, 107, 0.3), rgba(255, 195, 107, 0.16));
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+  transition: background 0.14s, border-color 0.14s;
+}
+
+/* The line itself, when there is room for it. */
+.ed-block em {
+  font: 400 10.5px/1 var(--ui);
+  font-style: normal;
+  color: var(--accent-ink);
+  opacity: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ed-block[data-live='true'] em,
+.ed-block:hover em {
+  opacity: 0.85;
+}
+
+.ed-block:hover {
+  background: rgba(255, 195, 107, 0.34);
+}
+
+.ed-block[data-live='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ed-block[data-dragging='true'] {
+  cursor: grabbing;
+  background: var(--accent);
+  border-color: #fff;
+  z-index: 3;
+}
+
+/*
+ * The cue numbers, above the blocks rather than inside them.
+ *
+ * Inside, a narrow block clipped its own number away — six pixels of block around twelve
+ * pixels of padding — so the label disappeared exactly where the track was densest. Out here
+ * each one is anchored to its cue's start and is free to be wider than the cue it names;
+ * which numbers get drawn at all is decided by collision, in `numbered`.
+ */
+.ed-nums {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 13px;
+  pointer-events: none;
+}
+
+.ed-nums b {
+  position: absolute;
+  top: 0;
+  font: 500 9.5px/13px var(--mono);
+  color: var(--ink-4);
+  transform: translateX(1px);
+}
+
+.ed-nums b[data-live='true'] {
+  color: var(--accent);
+}
+
+/*
+ * Labels appear when the block can hold them, and not before.
+ *
+ * This was a viewport-width media query, which asks the wrong question: it hid the numbers on
+ * a narrow *screen*, when what makes them unreadable is a narrow *block*. Forty-one cues in a
+ * three-minute video on a wide desktop never triggered it, and the row was a smear of
+ * overlapping digits — which is exactly the case the rule existed for.
+ *
+ * A container query asks the block about itself, which is the actual question.
+ */
+/*
+ * Which cues get a number is decided in JS, by collision — a block only asks whether *it* is
+ * wide enough, which drops the label from a short cue with empty track either side and keeps
+ * it on a wide cue in a crowd. So the element is simply absent when it should not be drawn.
+ *
+ * The block still refuses to let a number bleed past its edges.
+ */
+@container ed-cue (min-width: 96px) {
+  .ed-block em {
+    opacity: 0.85;
+  }
+}
+
+.ed-block[data-live='true'] b,
+.ed-block[data-dragging='true'] b {
+  color: var(--accent-ink);
+}
+
+/*
+ * Trim handles. Wider than they look, because a 2px target cannot be hit — but never so wide
+ * that they swallow the block.
+ *
+ * At a phone width a three-second cue in a one-minute video is a 25px block, and two fixed
+ * 10px handles left a 5px centre: the body could not be grabbed at all, so a short cue could
+ * be trimmed but not moved. Capped at a third each, there is always a middle.
+ */
+.ed-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: min(10px, 33%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.ed-edge[data-side='in'] {
+  inset-inline-start: -2px;
+}
+
+.ed-edge[data-side='out'] {
+  inset-inline-end: -2px;
+}
+
+.ed-block:hover .ed-edge::after {
+  content: '';
+  position: absolute;
+  inset-block: 4px;
+  inset-inline-start: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: #fff;
+  opacity: 0.75;
+}
+
+/* The playhead, with a head — a bare hairline is hard to find on a busy track. */
+.ed-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-inline-start: -1px;
+  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, 0.55));
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.ed-playhead i {
+  position: absolute;
+  top: -1px;
+  inset-inline-start: 50%;
+  width: 9px;
+  height: 9px;
+  margin-inline-start: -4.5px;
+  border-radius: 2px;
+  background: #fff;
+  transform: rotate(45deg);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
+}
+
+
+.ed-clock {
+  flex: none;
+  font: 500 12.5px/1 var(--mono);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ed-clock i {
+  font-style: normal;
+  color: var(--ink-4);
+  margin: 0 2px;
+}
+
+/* The lines. The only scrolling region on the screen. */
+.ed-list {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-inline-start: 1px solid var(--line);
+  /* Opaque. The app draws a starfield behind every screen, and a transparent panel put
+     caption text directly on top of a galaxy — pretty, and unreadable at the exact moment
+     the creator is proofreading it. */
+  background: rgba(8, 11, 24, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+/*
+ * The rows are a table, and they stop before the edge.
+ *
+ * Stretched to the full width of a wide panel the timings ended up 500px from the text they
+ * belong to, with nothing in between — the eye had to cross a void to read a row, which is
+ * the thing right-aligned columns do badly once a table gets wide. Capped, they stay a
+ * readable distance apart at any window size.
+ */
+.ed-rows {
+  padding: 0 14px 10px;
+}
+
+/* Says what the columns are, and stays put while the list scrolls. */
+.ed-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 10px 8px 8px;
+  background: rgba(8, 11, 24, 0.96);
+  border-bottom: 1px solid var(--line);
+  font: 500 10px/1 var(--mono);
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.ed-head span:last-child {
+  display: flex;
+  gap: 6px;
+}
+
+.ed-head i {
+  font-style: normal;
+  width: 56px;
+  text-align: center;
+}
+
+.ed-head u {
+  text-decoration: none;
+  width: 44px;
+  text-align: end;
+}
+
+.ed-bar {
+  /*
+   * Above the list, and it has to be said explicitly.
+   *
+   * `backdrop-filter` creates a stacking context, so the glossary panel's own `z-index` is
+   * scoped to this bar — and the list, which comes later in the DOM and also has a
+   * backdrop-filter, painted on top of it. The panel opened *underneath* the cue rows and
+   * its buttons could not be clicked.
+   */
+  position: relative;
+  z-index: 5;
+  background: rgba(8, 11, 24, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+/*
+ * One cue on one row: number, text, timing. Dense enough that a forty-line track is
+ * scannable — the previous rows were tall enough that five fitted in a tall window.
+ */
+.ed-cue {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  /* A hairline between rows rather than a box around each: nine boxes is nine things to
+     look at, one rule per row is a table. The transparent sides keep the selected state
+     from shifting anything sideways. */
+  border: 1px solid transparent;
+  border-bottom-color: var(--line);
+  transition: background 0.14s, border-color 0.14s;
+}
+
+.ed-cue:last-child {
+  border-bottom-color: transparent;
+}
+
+.ed-cue:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* The line currently on screen, so the list reads as a position in the video. */
+.ed-cue[data-live='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.ed-n {
+  padding: 7px 0 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+  text-align: start;
+}
+
+.ed-cue[data-live='true'] .ed-n {
+  color: var(--accent);
+}
+
+.ed-cue textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font: 400 14px/1.45 var(--ui);
+  /* No grip. `field-sizing: content` already grows the box to the text, so the handle did
+     nothing but draw a diagonal scratch in the corner of all nine rows. */
+  resize: none;
+  field-sizing: content;
+}
+
+.ed-cue textarea:hover {
+  border-color: var(--line);
+}
+
+.ed-cue textarea:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  background: var(--panel);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.ed-cue-time {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding-top: 6px;
+}
+
+.ed-cue-time > i {
+  font-style: normal;
+  color: var(--ink-4);
+  font-size: 11px;
+}
+
+/*
+ * A timecode as a clock: three segments, each its own spinner.
+ *
+ * Not a text box. A free field asks for a whole formatted string when what is being changed
+ * is usually one of three quantities — and a caption is nearly always a tenth out, not at the
+ * wrong minute.
+ */
+/*
+ * A field, visibly. It used to be bare numerals with a border on hover, which reads as text
+ * and gets treated as text — the affordance has to be there before the pointer is.
+ */
+.ed-clockfield {
+  display: inline-flex;
+  /*
+   * Baseline, not stretch.
+   *
+   * The separators were flex items centred in a box taller than the text, which put the colon
+   * halfway up the digits and left the full stop needing a hand-tuned nudge to sit anywhere
+   * sensible — `0:04.6` came out as `0 ˙ 04 ˙ 6`, two identical floating marks. Aligning on
+   * the baseline hands the job back to the font, which already knows where a colon and a full
+   * stop belong relative to a numeral.
+   */
+  align-items: baseline;
+  gap: 0;
+  padding: 1px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(6, 9, 20, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+
+.ed-clockfield:hover {
+  border-color: var(--line-2);
+}
+
+.ed-clockfield:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/*
+ * The separators sit on the numbers' baseline, not in the middle of the box.
+ *
+ * Grid-centring them put the full stop halfway up the digits, where it is indistinguishable
+ * from the colon — so `0:04.6` read as `0 ˙ 04 ˙ 6` and the two units it separates looked
+ * like the same kind of thing.
+ */
+/* Tight against the digits: a timecode is one number, not three with gaps. */
+.ed-clockfield > i {
+  font-style: normal;
+  color: var(--ink-4);
+}
+
+.ed-seg {
+  position: relative;
+  /* `inline-block`, so the segment's own text sits on the field's baseline along with the
+     separators. Room above and below for the spinner marks, which live inside the segment —
+     hung off the outside they read as spikes growing out of the border. */
+  display: inline-block;
+  padding: 7px 3px;
+  border-radius: 6px;
+  text-align: center;
+  cursor: ns-resize;
+  outline: none;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ed-seg:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+}
+
+/* The focused segment is the one the arrows move. It has to be obvious which that is. */
+.ed-seg:focus {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/*
+ * The spinner marks.
+ *
+ * Two small chevrons inside the segment, shown on hover — the moment the pointer arrives is
+ * when "you can change this" needs saying. Once a segment has focus its amber fill says it
+ * far more loudly than a mark could, and an amber chevron on amber would be invisible
+ * anyway, so they step aside.
+ */
+.ed-seg > u {
+  position: absolute;
+  inset: 2px 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.ed-seg:hover:not(:focus) > u {
+  opacity: 1;
+}
+
+.ed-seg > u::before,
+.ed-seg > u::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 50%;
+  margin-inline-start: -2.5px;
+  border-inline: 2.5px solid transparent;
+}
+
+.ed-seg > u::before {
+  top: 0;
+  border-bottom: 3px solid var(--accent);
+}
+
+.ed-seg > u::after {
+  bottom: 0;
+  border-top: 3px solid var(--accent);
+}
+
+.ed-arrow {
+  color: var(--ink-4);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.ed-len {
+  width: 44px;
+  text-align: end;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Too fast to read *in this language* — the threshold is the pack's, not a constant. */
+.ed-len[data-warn='true'] {
+  color: #ffb4a8;
+}
+
+@media (max-width: 1000px) {
+  /* Stacked, with the video pinned: scrolling the lines must not lose sight of what they
+     are being checked against. */
+  .ed-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ed-stage {
+    padding-bottom: 10px;
+  }
+
+  /* A smaller height budget, not a fixed height: `height` fought the `aspect-ratio` and the
+     9:16 preview came out landscape — the one shape it most needs to be right about. */
+  .ed-video {
+    --out-h: min(42vh, 340px);
+  }
+
+  .ed-list {
+    border-inline-start: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .ed-cue {
+    grid-template-columns: 26px minmax(0, 1fr);
+  }
+
+  .ed-cue-time {
+    grid-column: 2;
+    padding-top: 0;
+  }
+
+  /* The columns it labels do not exist once the row stacks. */
+  .ed-head {
+    display: none;
+  }
+}
+
+/*
+ * Deliver: the finished video, and the copy that goes with it.
+ *
+ * The player is the screen. This used to be three rows with a gradient rectangle beside each,
+ * so a creator reached the end of the product without ever seeing what they had made.
+ */
+.out {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 22px;
+  align-items: start;
+}
+
+@media (max-width: 940px) {
+  .out {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.out-stage {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Named by where they post. Each carries its own state, so the switch is also the controls. */
+.out-shapes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .out-shapes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The card: a place to look, and a box to tick. */
+.out-shape {
+  position: relative;
+  min-width: 0;
+}
+
+.out-shapes button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: start;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s;
+}
+
+.out-shapes button:hover {
+  border-color: var(--accent-line);
+}
+
+.out-shapes button[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/*
+ * Whether this shape is in the next render.
+ *
+ * Top-right of the card, clear of the label, and only on a shape that has not been made — a
+ * finished one has nothing to tick. The native checkbox is hidden rather than removed so it
+ * keeps its keyboard behaviour and its place in the tab order.
+ */
+.out-check {
+  position: absolute;
+  top: 7px;
+  inset-inline-end: 7px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.out-check input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.out-check span {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: rgba(5, 7, 16, 0.6);
+  transition:
+    border-color 0.14s,
+    background 0.14s;
+}
+
+.out-check input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* The tick, drawn rather than typed: a glyph would inherit the page font and jump around. */
+  background-image: linear-gradient(45deg, transparent 44%, #0b0f1e 44% 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 52%, #0b0f1e 52% 64%, transparent 64%);
+}
+
+.out-check input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.out-shapes b {
+  display: block;
+  font: 500 13.5px/1.3 var(--ui);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.out-shapes button[aria-selected='true'] b {
+  color: var(--ink);
+}
+
+.out-shapes small {
+  font: 500 11px/1.3 var(--mono);
+  color: var(--ink-4);
+}
+
+.out-shapes button > span:last-child {
+  min-width: 0;
+}
+
+/* The proportions of the shape, at a glance. */
+.out-chip {
+  flex: none;
+  border-radius: 4px;
+  border: 1px solid var(--line-2);
+  background: linear-gradient(150deg, #26305c, #0b0f22);
+}
+
+.out-shapes button[data-state='ready'] .out-chip {
+  border-color: var(--accent);
+  background: linear-gradient(150deg, #6c5327, #0b0f22);
+}
+
+/* The player. Sized by the shape it is showing, so a square render is not letterboxed into
+   a tall box and a tall one is not shrunk to fit a wide one. */
+/*
+ * The player, sized so it always fits between the heading and the action bar.
+ *
+ * Capped by *width* rather than height: `aspect-ratio` with `width: 100%` ignores a
+ * `max-height`, so a tall shape resolved past the bottom of the window and the video's own
+ * controls ended up underneath the action bar — reachable only by scrolling a screen that
+ * has nothing else to scroll to.
+ *
+ * `--out-h` is the height budget; each shape's width follows from its ratio.
+ */
+.out-frame {
+  --out-h: min(50vh, 480px);
+  position: relative;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: #05070f;
+  aspect-ratio: 16 / 9;
+  max-width: min(100%, calc(var(--out-h) * 16 / 9));
+}
+
+/*
+ * The first frame of the creator's own video, behind the empty state.
+ *
+ * Cropped by the frame exactly as ffmpeg will crop the export, so "not made yet" also answers
+ * the question the shape buttons are really asking: what does my video look like in this
+ * shape? Dimmed, because it is a preview of the input, not the output.
+ */
+.out-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.22;
+  filter: saturate(0.6);
+  pointer-events: none;
+}
+
+.out-frame[data-shape='9:16'] {
+  aspect-ratio: 9 / 16;
+  max-width: min(100%, calc(var(--out-h) * 9 / 16));
+}
+
+.out-frame[data-shape='1:1'] {
+  aspect-ratio: 1;
+  max-width: min(100%, var(--out-h));
+}
+
+.out-frame video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.out-waiting {
+  /* Its own stacking context, so the text sits above the ghost frame behind it. */
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--ink-4);
+}
+
+.out-waiting b,
+.out-waiting small,
+.out-waiting svg {
+  position: relative;
+  z-index: 1;
+}
+
+.out-waiting b {
+  font: 500 15px/1.35 var(--ui);
+  color: var(--ink-2);
+}
+
+.out-waiting small {
+  font: 400 13px/1.4 var(--ui);
+  color: var(--ink-4);
+}
+
+/* The one place a spinner is right: the wait is minutes and there is nothing else to show. */
+.out-waiting svg {
+  color: var(--accent);
+  animation: out-spin 1.4s linear infinite;
+}
+
+@keyframes out-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .out-waiting svg {
+    animation: none;
+  }
+}
+
+.out-copy {
+  min-width: 0;
+}
+
+
+.series {
+  margin-top: 20px;
+}
+
+/* On the task screen the heading lines up with the row of cards, not the page. */
+.lanes-head {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+/*
+ * The cue list on the plan screen.
+ *
+ * A comparison, laid out as one: number, what was heard, what will be burnt in, how long.
+ * Stacked, the eye travels down and back for every pair and the two languages read as one
+ * paragraph in two scripts; side by side they read as the same line, twice.
+ */
+.cues-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
+
+.cues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cue {
+  display: grid;
+  grid-template-columns: 30px 1fr 46px;
+  align-items: start;
+  gap: 4px 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Two texts side by side, once there is something to compare against. */
+.cues[data-compare='true'] .cue {
+  grid-template-columns: 30px 1fr 1fr 46px;
+}
+
+/* The number and the length: reference marks, kept out of the reading line. */
+.cue-n,
+.cue-len {
+  padding-top: 5px;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+.cue-len {
+  text-align: end;
+}
+
+/* Column headings, in the languages themselves. */
+.cue-legend {
+  padding-bottom: 4px;
+  border-top: none;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/*
+ * The caption itself. A textarea styled as text — no box until you reach for it — so the list
+ * reads as a script rather than as a form, and still says "you can change this".
+ */
+.cue-target {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  resize: none;
+  overflow: hidden;
+}
+
+.cue-target:hover {
+  border-color: var(--line);
+}
+
+.cue-target:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: #0b0f1e;
+}
+
+/*
+ * The language tag on a source line, which is also the switch.
+ *
+ * It says what language the line is showing in and swaps between as-spoken and English when
+ * pressed. Per line rather than per file because that is where the need is: most of a track
+ * is already readable and only the odd line is in a script the creator cannot read.
+ */
+.cue-lang {
+  display: inline-block;
+  margin-inline-end: 7px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: transparent;
+  font: 500 9.5px/1.4 var(--mono);
+  font-style: normal;
+  color: var(--ink-4);
+  vertical-align: 1px;
+  cursor: pointer;
+  transition:
+    border-color 0.14s,
+    color 0.14s;
+}
+
+.cue-lang:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+/* Showing the translation rather than what was said — a state, so it reads as switched on. */
+.cue-lang[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* What it is checked against. Quieter, and never editable: it is evidence, not content. */
+.cue-ref {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--ink-4);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/*
+ * Stacked on a narrow screen: side by side stops being a comparison and becomes two columns
+ * of three words each.
+ *
+ * Placed explicitly rather than left to auto-flow — the source comes second in the markup
+ * because it is the left-hand column when there is room, and auto-placement would put the
+ * caption below it in the wrong cell.
+ */
+@media (max-width: 780px) {
+  .cues[data-compare='true'] .cue {
+    grid-template-columns: 30px 1fr 46px;
+  }
+
+  .cues[data-compare='true'] .cue-n {
+    grid-area: 1 / 1;
+  }
+
+  .cues[data-compare='true'] .cue-target {
+    grid-area: 1 / 2;
+  }
+
+  .cues[data-compare='true'] .cue-len {
+    grid-area: 1 / 3;
+  }
+
+  .cues[data-compare='true'] .cue-ref {
+    grid-area: 2 / 2 / 3 / 4;
+  }
+
+  .cue-legend {
+    display: none;
+  }
+}
+
+/*
+ * Which language sits beside the captions on the plan screen.
+ *
+ * Small and quiet on purpose: it changes what you are reading, not what gets made. The
+ * control only appears on a translation, where there are two texts to choose between.
+ */
+.ref-pick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ref-pick button {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-4);
+  font: 500 11.5px/1 var(--mono);
+  cursor: pointer;
+  transition:
+    border-color 0.14s,
+    color 0.14s;
+}
+
+.ref-pick button:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+.ref-pick button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* The reference line under a cue in the editor. Evidence, never burnt in, never editable. */
+.ed-cue-ref {
+  margin: 2px 0 0;
+  padding: 0 9px;
+  color: var(--ink-4);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/*
+ * Zoom steps for the timeline.
+ *
+ * Outside the scroller on purpose: a control that scrolled away with the thing it controls
+ * would be unreachable exactly when it is wanted.
+ */
+.ed-zoom {
+  display: flex;
+  gap: 3px;
+  flex: none;
+  align-self: center;
+}
+
+.ed-zoom button {
+  min-width: 30px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-4);
+  font: 500 11px/1 var(--mono);
+  cursor: pointer;
+  transition:
+    border-color 0.14s,
+    color 0.14s;
+}
+
+.ed-zoom button:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+.ed-zoom button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/*
+ * "Put a line here."
+ *
+ * A strip in the gap between two cues rather than one button at the end of the list, because
+ * the position is the whole request: a line the engine missed belongs at a particular moment,
+ * and adding it at the end and dragging it into place is the same job done twice.
+ *
+ * Invisible until the gap is hovered. Forty of these down a caption list would otherwise be
+ * the loudest thing on the screen — and they sit between every pair, so they have to be
+ * silent when nobody is reaching for one.
+ */
+.ed-insert {
+  display: block;
+  width: 100%;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.ed-insert:hover,
+.ed-insert:focus-visible {
+  opacity: 1;
+}
+
+.ed-insert span {
+  display: block;
+  position: relative;
+  margin: 0 var(--pad);
+  border-top: 1px dashed var(--accent-line);
+  font: 500 10px/14px var(--mono);
+  color: var(--accent);
+  text-align: center;
+}
+
+/*
+ * Throwing a line away.
+ *
+ * As necessary as adding one: a speech engine writes lines over music that nobody said, and
+ * there was no way to remove them from the editor at all. Quiet until the row is hovered, so
+ * a list of forty does not read as forty invitations to delete something.
+ */
+.ed-drop {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink-4);
+  font: 400 15px/1 var(--ui);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s,
+    border-color 0.14s,
+    color 0.14s;
+}
+
+.ed-cue:hover .ed-drop,
+.ed-drop:focus-visible {
+  opacity: 1;
+}
+
+.ed-drop:hover {
+  border-color: #ff8a76;
+  color: #ffb4a8;
+}
+
+/* The watermark row: a label and three choices, which needs more room than a value column. */
+.mark-row {
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* The chosen logo, shown at the size it is recognised at rather than at render scale. */
+.mark-swatch {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #0b0f1e;
+}
+
+/*
+ * A secondary action inside the "why" line.
+ *
+ * Deliberately not a second button: there is one primary action per screen and this is the
+ * alternative to it, not a rival. It reads as the sentence it sits in until you reach for it.
+ */
+.linky {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 500 13.5px/1.3 var(--ui);
+  cursor: pointer;
+  text-underline-offset: 3px;
+}
+
+.linky:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.linky:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * The two ways to give this task a video.
+ *
+ * Side by side and the same size, because neither is the special case: uploading is the first
+ * time, picking one you have is the second and third, and the same footage is wanted more
+ * than once more often than not — subtitle it, then cut it, then dub it.
+ */
+.source {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.source:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.source-way {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 4px;
+  min-height: 168px;
+  padding: 28px 20px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* A hairline between them, and under them when the composer leads with the file. */
+.source-way + .source-way {
+  border-inline-start: 1px solid var(--line);
+}
+
+.source-way b {
+  font: 550 17px/1.35 var(--ui);
+  color: var(--ink);
+}
+
+.source-way small {
+  font: 400 13px/1.4 var(--ui);
+  color: var(--ink-4);
+}
+
+.source-way:hover b {
+  color: var(--accent);
+}
+
+/*
+ * The library: everything already uploaded, searchable.
+ *
+ * A sheet, because the list is unbounded — a row of chips works only while there are a
+ * handful, and the video someone wants is rarely the newest one.
+ */
+.library {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 30;
+}
+
+.library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-head b {
+  font: 600 17px/1.2 var(--ui);
+  color: var(--ink);
+}
+
+.library-find {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(5, 7, 16, 0.6);
+  color: var(--ink);
+  font: 400 14.5px/1.3 var(--ui);
+}
+
+.library-find:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.library-list {
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.library-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  text-align: start;
+}
+
+.library-item:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.library-item b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 450 14.5px/1.4 var(--ui);
+  color: var(--ink-2);
+}
+
+.library-item small {
+  flex: none;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--ink-4);
+}
+
+
+/*
+ * The voice picker: a select shaped like the language pickers, with its sample beside it.
+ *
+ * It was seven cards in a wrapping row — the width of the editor spent on one question, and
+ * seven equal buttons reading as seven actions rather than one choice. See `Voices.tsx`.
+ */
+.voices {
+  min-width: 220px;
+}
+
+.voices-pick {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.voices-pick select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font: 500 14px/1.75 var(--ui);
+  cursor: pointer;
+}
+
+.voice-play {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.voice-play:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.voice-play:hover:not(:disabled),
+.voice-play[data-on='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+/*
+ * The reading-pace warning.
+ *
+ * Only rendered when something is wrong with the pace, so it reads as an alert rather than as
+ * a permanent readout nobody looks at.
+ */
+.ed-pace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn, #e8a33d) 45%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn, #e8a33d) 10%, transparent);
+}
+
+.ed-pace b {
+  font: 600 14px/1 var(--mono);
+  color: var(--warn, #e8a33d);
+}
+
+.ed-pace small {
+  font: 400 11px/1.3 var(--ui);
+  color: var(--ink-3);
+}
+
+/*
+ * The dub row on the preview screen: who speaks, and hearing them.
+ *
+ * Above the caption toolbar and visually separated from it, because the two rows decide
+ * different things — one is how the words look, the other is what the video sounds like.
+ */
+.ed-dub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 20px;
+  /* The same inset as `.ed-top` and `.ed-bar` above and below it. Without it the row sat
+     flush against the window edge while every other row in the editor was inset, so the
+     first voice and the "Spoken by" label were cut in half by the frame. */
+  padding: 12px var(--pad) 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ed-dub .voices {
+  margin-top: 0;
+}
+
+.ed-subs {
+  min-width: 190px;
+}
+
+.ed-subs select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  /* 1.75, like the other language selects: Burmese and Thai stack marks a 1.3 line box clips. */
+  font: 500 14px/1.75 var(--ui);
+  cursor: pointer;
+}
+
+.ed-hear {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ed-hear small {
+  font: 400 11px/1.4 var(--ui);
+  color: var(--ink-4);
+}
+
+@media (max-width: 720px) {
+  /* The explanation goes under the button rather than beside it; at this width the two
+     together push the shape picker off the row. */
+  .ed-dub {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ============================================================================
+ * The writing console — Narrate's composer.
+ *
+ * The rest of the app treats the starfield as a backdrop to sit in front of. This one sits
+ * *in* it: the surface is genuinely translucent so stars drift behind the words, and the
+ * edge is a slow aurora rather than a hairline. It is the one place in the product where the
+ * theme is the interface rather than the wallpaper.
+ * ========================================================================== */
+
+/*
+ * A registered custom property, so the conic gradient's angle can be animated at all.
+ * Interpolating a bare `--spin` does nothing — the browser has no idea it is an angle, so it
+ * snaps from 0 to 360 in one frame and the ring appears static.
+ */
+@property --spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.composer[data-sky='true'] {
+  position: relative;
+  border-color: transparent;
+  border-radius: 20px;
+  /* Deep and translucent: the cosmos reads through it, which is the whole idea. */
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(255, 195, 107, 0.07), transparent 62%),
+    rgba(9, 13, 28, 0.58);
+  backdrop-filter: blur(16px) saturate(1.35);
+  -webkit-backdrop-filter: blur(16px) saturate(1.35);
+  box-shadow:
+    0 24px 70px -30px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  animation: console-arrive 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/*
+ * The aurora edge.
+ *
+ * Drawn as a masked ring rather than a border-image so the corners stay perfectly round: the
+ * gradient fills the padding box, then the content box is punched out of it, leaving exactly
+ * one pixel of colour following the radius.
+ */
+.composer[data-sky='true']::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--spin),
+    rgba(255, 195, 107, 0.85),
+    rgba(122, 162, 255, 0.5),
+    rgba(196, 132, 255, 0.55),
+    rgba(110, 231, 168, 0.4),
+    rgba(255, 195, 107, 0.85)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: spin-ring 14s linear infinite;
+  opacity: 0.8;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+/* A held breath of light under the console, so it reads as floating rather than pasted on. */
+.composer[data-sky='true']::after {
+  content: '';
+  position: absolute;
+  inset: 12% 6% -18% 6%;
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 160, 70, 0.26), transparent 70%);
+  filter: blur(38px);
+  opacity: 0.7;
+  z-index: -1;
+  transition: opacity 0.5s ease;
+  pointer-events: none;
+  animation: console-breathe 7s ease-in-out infinite;
+}
+
+/* Writing brightens the edge. The console wakes up rather than drawing a focus ring. */
+.composer[data-sky='true']:focus-within {
+  border-color: transparent;
+  box-shadow:
+    0 28px 80px -30px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.composer[data-sky='true']:focus-within::before {
+  opacity: 1;
+  animation-duration: 7s;
+}
+
+.composer[data-sky='true']:focus-within::after {
+  opacity: 0.85;
+}
+
+/* Dragging a file over it blooms, so the drop target is unmistakable without a dashed box. */
+.composer[data-sky='true'][data-over='true']::before {
+  opacity: 1;
+  animation-duration: 2.4s;
+}
+
+.composer[data-sky='true'][data-over='true']::after {
+  opacity: 1;
+}
+
+.composer[data-sky='true'] .composer-text {
+  background: none;
+  padding: 22px 24px 8px;
+  font-size: 15.5px;
+  line-height: 1.7;
+  caret-color: var(--accent);
+}
+
+.composer[data-sky='true'] .composer-text::placeholder {
+  color: var(--ink-4);
+}
+
+.composer[data-sky='true'] .composer-foot {
+  padding: 6px 18px 16px;
+  gap: 10px;
+}
+
+/* The attach controls: glass chips that lift toward the light on hover. */
+.composer[data-sky='true'] .composer-attach {
+  border-radius: 999px;
+  padding: 8px 15px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  transition:
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.composer[data-sky='true'] .composer-attach:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  box-shadow: 0 6px 20px -8px rgba(255, 160, 70, 0.55);
+}
+
+.composer[data-sky='true'] .composer-attach:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+@keyframes spin-ring {
+  to {
+    --spin: 360deg;
+  }
+}
+
+@keyframes console-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.42;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.6;
+  }
+}
+
+@keyframes console-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.994);
+  }
+}
+
+/*
+ * Motion is decoration here, so it goes entirely when asked. The console keeps its glass and
+ * its edge — a static gradient still reads as the same object — it simply stops moving.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .composer[data-sky='true'],
+  .composer[data-sky='true']::before,
+  .composer[data-sky='true']::after {
+    animation: none;
+  }
+}

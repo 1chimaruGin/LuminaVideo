@@ -1,0 +1,71 @@
+@import 'tailwindcss';
+
+/* Design tokens, lifted from the prototypes in Lumina-Web.html / Lumina-Mobile.html.
+   Nothing in a component may hardcode a hex value — if a colour is needed and not here,
+   it belongs here first. */
+@theme {
+  --color-bg: #05060f;
+  --color-fg: #eef1fb;
+  --color-muted: #7d88ad;
+  --color-subtle: #6f7aa0;
+
+  --color-accent-from: #ffc36b;
+  --color-accent-to: #ff8f3d;
+  --color-on-accent: #1a1103;
+
+  --color-link: #ffc36b;
+  --color-link-hover: #ffdca6;
+
+  --color-hairline: rgb(150 170 230 / 0.13);
+  --color-surface: rgb(18 22 42 / 0.85);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+
+  --radius-card: 11px;
+}
+
+:root {
+  color-scheme: dark;
+  /* Reading direction and script-specific typography come from the active LanguagePack,
+     applied to :root by the i18n layer. Never hardcoded per component. */
+  --pack-line-height: 1.4;
+  --pack-letter-spacing: 0em;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  line-height: var(--pack-line-height);
+  letter-spacing: var(--pack-letter-spacing);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  /* The ambient field from the prototype. */
+  background:
+    radial-gradient(1100px 700px at 15% -10%, rgb(70 110 220 / 0.2), transparent 60%),
+    radial-gradient(900px 600px at 88% 8%, rgb(255 170 70 / 0.12), transparent 62%),
+    radial-gradient(1000px 800px at 50% 110%, rgb(90 60 190 / 0.18), transparent 60%),
+    var(--color-bg);
+  background-attachment: fixed;
+}
+
+/* Thumb-reachable primary actions sit above the home indicator on iOS. */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@keyframes lum-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

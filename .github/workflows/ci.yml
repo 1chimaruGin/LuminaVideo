@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: services/lumina }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with: { enable-cache: true }
+      - run: uv sync --extra dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @lumina/web exec tsc --noEmit
+      - run: pnpm --filter @lumina/web build
+
+  # The generated client must match the API's OpenAPI schema. A stale committed client
+  # means the frontend's types silently disagree with the backend, and nothing catches it
+  # until runtime — which is the entire reason the client is generated.
+  client-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: cd services/lumina && uv sync --extra dev
+      - name: Start API
+        run: cd services/lumina && uv run uvicorn lumina.api.main:app --port 8000 &
+      - run: npx wait-on http://localhost:8000/health
+      - run: pnpm client:check

@@ -1,0 +1,40 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+htmlcov/
+.coverage
+
+# node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# local data
+.data/
+media/
+*.mp4
+*.wav
+
+# editors / os
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Caption faces fetched by `make fonts` — upstream binaries, not ours to vendor.
+services/lumina/var/
+
+# Provider credential downloads. The values live in .env, which is already ignored;
+# a copy in the tree is one `git add -A` away from being published.
+client_secret_*.json
