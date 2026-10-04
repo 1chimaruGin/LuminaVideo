@@ -29,20 +29,91 @@ infra/             compose for local dev, Dockerfiles, deployment
 
 ## Getting started
 
+### What has to be on the machine first
+
+Five things, and the rest is fetched:
+
+| | version | note |
+|---|---|---|
+| Python | **≥ 3.12** | `uv` manages the interpreter and the venv |
+| [uv](https://docs.astral.sh/uv/) | any recent | the only Python entry point used here |
+| Node | **≥ 20** | with `pnpm` **10.34.4** — `corepack enable` pins it from `package.json` |
+| ffmpeg | 6.x or newer | also `ffprobe`; every compose step shells out to it |
+| PostgreSQL **server** | 14+ | the *server* package, not just `psql` — see below |
+
+The Postgres requirement is the one that surprises people. `make up` builds a private cluster
+rather than using a system service, so it needs `initdb` and `pg_ctl`, which ship in
+`postgresql` (the server package) and **not** in `postgresql-client`. They do not have to be on
+`PATH` — `infra/local/pg.sh` falls back to the newest `/usr/lib/postgresql/*/bin` it can find.
+On Debian or Ubuntu that is `sudo apt install postgresql ffmpeg`.
+
+### The sequence
+
 ```bash
-make install       # uv sync + pnpm install
-make up            # local postgres + migrations
-make fonts         # caption faces (~35 MB, fetched not vendored)
+cp .env.example .env   # required — nothing creates this for you
+make install           # uv sync + pnpm install
+make up                # private postgres cluster + migrations, both databases
+make fonts             # caption faces (~35 MB, fetched not vendored)
+make browser           # the Chromium that rasterizes captions (~170 MB)
 ```
+
+`cp .env.example .env` is the step that is easy to skip and expensive to debug. The defaults in
+it are a complete working local configuration — SQLite-free, keyless, `PROVIDERS_ENABLED=fake`
+— so the stack runs end to end with no account anywhere. Every value that needs an outside
+credential is left empty on purpose, and the feature that needs it says so rather than failing
+obscurely.
+
+Two of those steps download rather than vendor, and both are load-bearing at *render* time
+rather than at import time, which is the worst moment to discover them: `make fonts` because a
+box with no Myanmar or CJK face renders empty rectangles burnt into the video, and
+`make browser` because `uv sync` installs the playwright package but never the browser it
+drives.
+
+### Check it worked
+
+```bash
+make test          # the whole suite, against lumina_test
+make lint          # ruff + ruff format + mypy strict + tsc
+```
+
+Both must be green on a fresh checkout with no keys set. If `make test` reports
+`ConnectionRefused` on port 55432, the cluster is not running — `make up` again.
+
+### Run it
+
+In separate terminals:
+
+```bash
+make api           # http://localhost:8000  (docs at /docs)
+make worker        # light pool: planning, LLM, provider polling
+make render        # cpu-render pool: ffmpeg + chromium
+make web           # http://localhost:5173
+```
+
+| | port | fixed by |
+|---|---|---|
+| web | **5173** | `apps/web/vite.config.ts` |
+| API | **8000** | `make api`, and `VITE_API_BASE_URL` must agree |
+| postgres | **55432** | `infra/local/pg.sh`, chosen so it cannot collide with a system 5432 |
+
+These three are not free-floating. `WEB_BASE_URL` must name the port the web app is actually
+served on, because that is where OAuth sends the browser back to once a provider has signed
+someone in; point it somewhere nothing listens and sign-in completes server-side and then
+lands on a dead page, which looks like a broken login and is not one.
+
+**Settings are read once, at process start.** They are cached, so editing `.env` while the API
+is running changes nothing until it is restarted — including every value above.
+
+### About the database
 
 `make up` runs a **private PostgreSQL cluster in `.data/pg`** — no Docker, no root, no system
 service. It creates two databases: `lumina` for development and `lumina_test` for the suite.
 They are separate because the tests write jobs into the same table a running worker claims
 from, and sharing one means a dev worker picks up a test's job and fails it — a failure that
-is harmless, misleading, and takes an afternoon to trace back. Postgres ships everything needed to do this: `initdb` creates a cluster in a
-directory you own and `pg_ctl` starts it on port 55432, chosen so it can never collide with a
-system Postgres on 5432. It is the same server production uses, which a SQLite stand-in would
-not be.
+is harmless, misleading, and takes an afternoon to trace back. Postgres ships everything
+needed to do this: `initdb` creates a cluster in a directory you own and `pg_ctl` starts it on
+port 55432, chosen so it can never collide with a system Postgres on 5432. It is the same
+server production uses, which a SQLite stand-in would not be.
 
 Media goes to `.data/media` by default, so the whole pipeline runs end to end — planning,
 generation, narration, ffmpeg composition — with **nothing external installed** beyond
@@ -53,15 +124,6 @@ make db            # psql shell
 make db-reset      # delete the cluster and rebuild from migrations
 make down          # stop it
 make up-docker     # the container stack instead (adds redis, minio, tusd)
-```
-
-Then, in separate terminals:
-
-```bash
-make api           # http://localhost:8000  (docs at /docs)
-make worker        # light pool: planning, LLM, provider polling
-make render        # cpu-render pool: ffmpeg + chromium
-make web           # http://localhost:5173
 ```
 
 `make help` lists everything.
@@ -189,6 +251,14 @@ the same.
 
 They are off until you register an OAuth app with each provider — credentials belong to you
 and cannot ship in a repository. A greyed button reading "NOT SET UP" is that, not a fault.
+A button that is greyed with **every** provider off, including ones you configured, usually
+means the API is not reachable rather than that anything is unregistered; the tooltip says
+which.
+
+The Google console offers the credentials as a `client_secret_*.json` download. **Keep the two
+values in `.env` and let the file go** — `.gitignore` covers that name, because a live secret
+sitting in the working tree is one `git add -A` away from being public and cannot be recalled
+once pushed.
 
 **Step-by-step: [OAUTH.md](OAUTH.md).** GitHub takes about two minutes and is the easiest to
 test with.

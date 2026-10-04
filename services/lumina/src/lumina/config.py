@@ -140,7 +140,13 @@ class Settings(BaseSettings):
     #: it must match what the provider has registered exactly — a trailing slash is a mismatch.
     public_base_url: str = Field(default="http://127.0.0.1:8000", alias="PUBLIC_BASE_URL")
     #: Where to send the browser back to once signed in.
-    web_base_url: str = Field(default="http://127.0.0.1:5175", alias="WEB_BASE_URL")
+    #:
+    #: Must be the port the web app is actually served on — `apps/web/vite.config.ts` pins it
+    #: to 5173. This defaulted to 5175, which nothing listens on: in development the browser
+    #: sends its own origin and `safe_next` accepts any loopback address, so the mismatch stayed
+    #: invisible there and only bit where no `next` is sent, and in production, which accepts
+    #: this value and nothing else.
+    web_base_url: str = Field(default="http://127.0.0.1:5173", alias="WEB_BASE_URL")
 
     stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")

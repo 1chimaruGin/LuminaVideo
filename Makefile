@@ -80,7 +80,13 @@ reset-demo: ## Clear the dev database to one account and a few seeded projects: 
 fonts: ## Fetch the caption faces every registered language pack needs
 	cd $(PY) && uv run python scripts/fetch_fonts.py
 
+# Chromium draws the captions (execution/compose/captions.py), and `uv sync` installs the
+# playwright *package*, never the browser it drives. Without this the caption rasterizer
+# fails at render time rather than at install time, which is the worst moment to find out.
+browser: ## Fetch the Chromium that rasterizes captions (~170 MB)
+	cd $(PY) && uv run playwright install chromium
+
 client: ## Regenerate the typed TS API client from OpenAPI
 	pnpm client:generate
 
-.PHONY: help install up down db db-reset up-docker api worker render web mock migrate revision test lint fmt client fonts reset-demo
+.PHONY: help install up down db db-reset up-docker api worker render web mock migrate revision test lint fmt client fonts browser reset-demo

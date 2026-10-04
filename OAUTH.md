@@ -16,8 +16,8 @@ have to type the same string in two places.
 
 | You open the app at | Set `PUBLIC_BASE_URL` to |
 |---|---|
-| `http://localhost:5175` (browser on this machine) | `http://localhost:8000` |
-| `http://192.168.223.205:5175` (from Windows, or a phone) | `http://192.168.223.205:8000` |
+| `http://localhost:5173` (browser on this machine) | `http://localhost:8000` |
+| `http://192.168.223.205:5173` (from Windows, or a phone) | `http://192.168.223.205:8000` |
 
 Google and GitHub both accept `http://localhost`. **Neither accepts a bare IP address**, and
 Apple requires HTTPS and a real domain — so for anything other than localhost you need a
@@ -42,13 +42,13 @@ that HTTPS URL as `PUBLIC_BASE_URL`.
    GOOGLE_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=GOCSPX-...
    PUBLIC_BASE_URL=http://localhost:8000
-   WEB_BASE_URL=http://localhost:5175
+   WEB_BASE_URL=http://localhost:5173
    ```
 
 ## 2. GitHub  (~2 minutes, free — the easiest to test with)
 
 1. Go to <https://github.com/settings/developers> → **New OAuth App**.
-2. Homepage URL: `http://localhost:5175`
+2. Homepage URL: `http://localhost:5173`
 3. Authorization callback URL:
    ```
    http://localhost:8000/auth/oauth/github/callback
