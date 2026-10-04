@@ -1312,6 +1312,20 @@ def _brace(text: str, open_at: int) -> str:
     raise AssertionError("unbalanced")
 
 
+def _fields(body: str) -> dict[str, str]:
+    """`key: 'value'` and `key: true` out of one object literal.
+
+    Quoted values and bare ones are matched separately rather than by one pattern with an
+    optional quote. A single character class wide enough to hold `image/*,video/*` also
+    swallows the comma after `required: true`, which then reads as `"true,"` and compares
+    unequal to every boolean — a parser bug that would have been reported as a mismatch
+    between the browser and the server.
+    """
+    out = dict(re.findall(r"(\w+): '([^']*)'", body))
+    out.update(dict(re.findall(r"(\w+): (true|false)\b", body)))
+    return out
+
+
 def _takes() -> dict[str, dict[str, str]]:
     """The Brief screen's table of what each task accepts, as data.
 
@@ -1324,7 +1338,7 @@ def _takes() -> dict[str, dict[str, str]]:
         at = src.index(decl)
         return _brace(src, at + src[at:].index("{"))
 
-    defaults = dict(re.findall(r"(\w+): '?([\w/*.]+)'?", literal("const PICTURE: Takes =")))
+    defaults = _fields(literal("const PICTURE: Takes ="))
     table = literal("const TAKES: Record")
     out: dict[str, dict[str, str]] = {}
     for m in re.finditer(r"(?m)^  (\w+): (PICTURE,|\{)", table):
@@ -1334,7 +1348,7 @@ def _takes() -> dict[str, dict[str, str]]:
             continue
         body = _brace(table, m.start(2))
         row = dict(defaults) if "...PICTURE" in body else {}
-        row.update(dict(re.findall(r"(\w+): '?([\w/*.]+)'?", body)))
+        row.update(_fields(body))
         out[name] = row
     return out
 
@@ -1360,7 +1374,13 @@ async def test_the_browser_asks_for_exactly_the_files_the_server_accepts(api):
         assert (row["required"] == "true") is needs, f"{name}: file requiredness disagrees"
         # A generating lane takes an optional still and refuses footage; a source lane is the
         # other way round. Both refusals live in POST /projects, so the picker must match.
-        assert row["accept"] == ("video/*" if needs else "image/*"), f"{name}: wrong accept"
+        #
+        # Narrate is the one lane that takes both, and it is not an exception to the rule but
+        # the rule stated properly: the picker must offer exactly what `POST /projects` will
+        # accept for that lane. It cuts a *sequence* — a picture or a clip per line — so both
+        # are legitimate input and refusing either in the browser would hide half the feature.
+        expected = "image/*,video/*" if name == "narrate" else "video/*" if needs else "image/*"
+        assert row["accept"] == expected, f"{name}: wrong accept"
 
 
 def test_the_browser_and_the_server_name_the_same_tasks() -> None:

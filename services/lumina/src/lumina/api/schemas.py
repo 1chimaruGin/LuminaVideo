@@ -34,6 +34,12 @@ class SceneOut(BaseModel):
     error: str | None
 
     preview_asset_id: uuid.UUID | None
+    #: Whether this beat's picture is a clip rather than a still.
+    #:
+    #: The browser cannot tell from the asset URL — it is `/assets/<uuid>` with no extension —
+    #: and it has to know, because a still is drawn as a background and a clip has to be
+    #: played. Rendering an mp4 as a CSS background image produces a black frame and no error.
+    picture_is_clip: bool = False
     final_asset_id: uuid.UUID | None
     vo_asset_id: uuid.UUID | None
 
@@ -96,6 +102,8 @@ class PlanOut(BaseModel):
     #: "explainer" until it arrived — so on a reload a Dub project drew the Subtitle editor,
     #: with Subtitle's wording and no voice controls, for as long as the list took to land.
     recipe: str = "explainer"
+    #: Indices of scenes whose line was written to fill a length target, not by the creator.
+    written_by_us: list[int] = Field(default_factory=list)
     #: The file this project was made from, for the lanes that start from one. Without it the
     #: player has nothing to show until a render exists — the creator uploads a video and then
     #: cannot watch the video they uploaded.
@@ -206,6 +214,13 @@ class NewProject(BaseModel):
     #: Which voice a dub is spoken in. Null on every other lane, and on a dub that has not
     #: been asked yet — see the column comment in the migration.
     voice_id: str | None = None
+    #: The pictures a narrated video is cut from, in the order they should appear.
+    #:
+    #: A list because this lane is a *sequence*, not a backdrop: real faceless video changes
+    #: visual every three to six seconds, so a three-minute script wants thirty to sixty of
+    #: them. One asset is the degenerate case — a single clip with nothing else becomes a bed
+    #: that loops, which is right for narration over gameplay and wrong for everything else.
+    source_asset_ids: list[uuid.UUID] = Field(default_factory=list)
     #: What the creator called it, when they said.
     #:
     #: Separate from `brief` because the two are different things on a lane that starts from a
@@ -339,6 +354,12 @@ class NewRender(BaseModel):
     #: Caption size, as a multiplier on the default. The default is 5% of the frame's short
     #: edge, which holds the same physical size across every export; this is taste on top.
     caption_scale: float = Field(default=1.0, ge=0.6, le=1.8)
+    #: Whether the caption highlights word by word as it is spoken.
+    #:
+    #: True is the short-form convention and what this shipped with. False holds each line
+    #: whole and still, which is what a documentary or anything a viewer *reads* wants — and
+    #: what someone asks for when the moving highlight is the thing they do not like.
+    caption_karaoke: bool = True
 
 
 class RenderOut(BaseModel):

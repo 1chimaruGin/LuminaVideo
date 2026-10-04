@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { fetchDubPreview } from '../../api/client'
 import { useFixTiming, useLanguages } from '../../api/queries'
-import { CAPTION_STYLES } from '../data'
+import { CAPTION_STYLES, RECIPES } from '../data'
 import type { Studio } from '../live'
 import { Pipeline } from '../Pipeline'
 import { Voices } from '../Voices'
@@ -126,20 +126,32 @@ export function Captions({ s }: { s: Studio }) {
    * produced these lines, `plan` wrote one scene per line, and the caption stage reads them
    * back. A local copy would give the screen something to disagree with.
    */
-  const cues: Cue[] = useMemo(
-    () =>
-      s.scenes.map((scene) => {
-        const start = scene.sourceStartMs ?? 0
-        return {
-          id: scene.id,
-          text: scene.line,
-          startMs: start,
-          endMs: start + scene.durationMs,
-          translations: scene.translations,
-          spokenLanguage: scene.spokenLanguage,
-        }
-      }),
-    [s.scenes],
+  /*
+   * Where each line sits, and the two lanes disagree about it.
+   *
+   * A lane that keeps the creator's footage has a timestamp per scene — the moment it was
+   * said — and the cue belongs there. A lane that *writes* its video has none: the scenes are
+   * laid end to end, so a line starts where the one before it ended.
+   *
+   * Falling back to zero for the second case put every cue at 0:00.0 — thirty lines all
+   * claiming to start at the beginning, a timeline with one mark on it, and a preview that
+   * drew every caption at once on top of itself.
+   */
+  const cues: Cue[] = useMemo(() => {
+    let at = 0
+    return s.scenes.map((scene) => {
+      const start = scene.sourceStartMs ?? at
+      at = start + scene.durationMs
+      return {
+        id: scene.id,
+        text: scene.line,
+        startMs: start,
+        endMs: start + scene.durationMs,
+        translations: scene.translations,
+        spokenLanguage: scene.spokenLanguage,
+      }
+    })
+  }, [s.scenes],
   )
 
   const duration = s.durationMs || cues.at(-1)?.endMs || 0
@@ -170,28 +182,116 @@ export function Captions({ s }: { s: Studio }) {
   const fixTiming = useFixTiming(s.projectId ?? '')
 
   const dubbing = s.recipe === 'dub'
+  const narrating = s.recipe === 'narrate'
+  /** The scene whose line is on screen — its picture is what the frame should show. */
+  const beat = useMemo(() => s.scenes.find((x) => x.id === live?.id) ?? null, [s.scenes, live])
+  const plate = useRef<HTMLVideoElement>(null)
+
+  //: A clip on a beat follows the preview's own clock rather than running on its own — the
+  //: beat is as long as its line takes to say, and the render cuts the clip to exactly that.
+  useEffect(() => {
+    const el = plate.current
+    if (!el) return
+    if (playing) void el.play().catch(() => {})
+    else el.pause()
+  }, [playing, beat?.pictureUrl])
   //: Hearing the dub instead of the original. Off by default: the creator is checking the
   //: words against what was actually said for most of this screen's life, and that needs the
   //: original audio.
   const [hearDub, setHearDub] = useState(false)
-  const dub = useDubTrack(video, {
-    on: dubbing && hearDub,
+  const speech = useRef<HTMLAudioElement>(null)
+  const dub = useDubTrack(video, speech, {
+    //: Narrate speaks too — it was left out when the row below was opened up to it, so the
+    //: button toggled, the label changed, and nothing was ever fetched or played.
+    on: (dubbing || narrating) && hearDub,
     projectId: s.projectId,
     voice: s.voiceId,
   })
 
-  const seek = useCallback((ms: number) => {
-    const el = video.current
-    if (el) el.currentTime = Math.max(0, ms / 1000)
-    setAt(ms)
-  }, [])
+  const seek = useCallback(
+    (ms: number) => {
+      const el = video.current
+      if (el) el.currentTime = Math.max(0, ms / 1000)
+      //: Scrubbing has to move the voice as well, or the picture jumps and the speech
+      //: carries on from where it was.
+      const speech = dub.ref.current
+      if (speech && dub.ready) speech.currentTime = Math.max(0, ms / 1000)
+      setAt(ms)
+    },
+    [dub.ref, dub.ready],
+  )
 
   const toggle = useCallback(() => {
     const el = video.current
-    if (!el) return
-    if (el.paused) void el.play()
-    else el.pause()
-  }, [])
+    if (el) {
+      if (el.paused) void el.play()
+      else el.pause()
+      return
+    }
+    //: No video on a narrated project — the pictures are stills. If the narration is loaded
+    //: it is the thing being played, and the pictures follow it; otherwise the bare clock
+    //: below runs so the preview still moves before any voice has been made.
+    const speech = dub.ref.current
+    if (speech && dub.ready) {
+      if (speech.paused) void speech.play().catch(() => {})
+      else speech.pause()
+      setPlaying(speech.paused)
+      return
+    }
+    setPlaying((was) => !was)
+  }, [dub.ref, dub.ready])
+
+  /*
+   * The clock, when there is no video to be one.
+   *
+   * Every other lane inherits time from the footage it is previewing. A narrated video has no
+   * footage yet — it is a script, a voice and a pile of pictures — so pressing play advanced
+   * nothing and the preview sat on the first line forever.
+   *
+   * Real time, sampled, rather than a frame counter: the beats come from measured speech, so
+   * the preview should drift the same way the render will.
+   */
+  /*
+   * The narration drives everything when it is playing.
+   *
+   * One clock or the pictures and the voice drift apart — they were two independent timers,
+   * so a line could be on screen while a different one was being spoken. The audio is the
+   * authority because it is the thing whose length is real: a beat lasts exactly as long as
+   * its line took to say.
+   */
+  useEffect(() => {
+    const speech = dub.ref.current
+    if (!speech || !dub.ready) return
+    const follow = () => setAt(Math.round(speech.currentTime * 1000))
+    const started = () => setPlaying(true)
+    const stopped = () => setPlaying(false)
+    speech.addEventListener('timeupdate', follow)
+    speech.addEventListener('play', started)
+    speech.addEventListener('pause', stopped)
+    speech.addEventListener('ended', stopped)
+    return () => {
+      speech.removeEventListener('timeupdate', follow)
+      speech.removeEventListener('play', started)
+      speech.removeEventListener('pause', stopped)
+      speech.removeEventListener('ended', stopped)
+    }
+  }, [dub.ref, dub.ready])
+
+  useEffect(() => {
+    //: Only when nothing else is keeping time — a video, or a narration that has loaded.
+    if (!playing || video.current || (dub.ref.current && dub.ready)) return
+    const started = Date.now() - at
+    const tick = setInterval(() => {
+      const now = Date.now() - started
+      if (now >= duration) {
+        setAt(duration)
+        setPlaying(false)
+        return
+      }
+      setAt(now)
+    }, 100)
+    return () => clearInterval(tick)
+  }, [playing, duration, at, dub.ref, dub.ready])
 
   // Space plays and pauses, the arrows step a second — the shortcuts every editor has, and
   // the reason a captioner can work without reaching for the mouse. Ignored while typing, or
@@ -245,16 +345,22 @@ export function Captions({ s }: { s: Studio }) {
              * creator dubbing their video into Burmese that "only the captions are drawn on"
              * describes a different product from the one they are buying.
              */}
-            <span>{dubbing ? DUB_WHY : SUBTITLE_WHY}</span>
+            <span>{narrating ? NARRATE_WHY : dubbing ? DUB_WHY : SUBTITLE_WHY}</span>
             <b>1 credit</b>
           </div>
           <button
             className="btn primary block"
             onClick={() => s.go('deliver')}
-            disabled={dubbing && !s.voiceId}
+            disabled={(dubbing || narrating) && !s.voiceId}
           >
             <IconSpark size={19} />
-            {dubbing ? (s.voiceId ? 'Make the dub' : 'Choose a voice first') : 'Burn in the captions'}
+            {dubbing || narrating
+              ? s.voiceId
+                ? narrating
+                  ? 'Make the video'
+                  : 'Make the dub'
+                : 'Choose a voice first'
+              : 'Burn in the captions'}
           </button>
         </>
       }
@@ -270,7 +376,9 @@ export function Captions({ s }: { s: Studio }) {
            */}
           <header className="ed-top">
             <span className="ed-what">
-              <b>{dubbing ? 'Dub' : 'Subtitles'}</b>
+              {/* The lane's own name, from the one table that has it — so a lane added
+                  later is not a third special case here. */}
+              <b>{RECIPES.find((r) => r.id === s.recipe)?.name ?? 'Subtitles'}</b>
               <span>
                 {cues.length} lines · {clock(duration)}
               </span>
@@ -287,7 +395,7 @@ export function Captions({ s }: { s: Studio }) {
            * a different kind of decision — those adjust how the words *look*, this decides
            * what the video *sounds* like, which is the whole product on this lane.
            */}
-          {dubbing ? (
+          {dubbing || narrating ? (
             <div className="ed-dub">
               {/*
                * `planLanguage`, not `language`. The second is the *channel's* language — what
@@ -338,16 +446,27 @@ export function Captions({ s }: { s: Studio }) {
                   }
                   onClick={() => setHearDub((was) => !was)}
                 >
-                  {hearDub ? 'Hearing the dub' : 'Hear the dub'}
+                  {dub.working ? (
+                    <>
+                      <span className="spinner" aria-hidden="true" />
+                      Preparing
+                    </>
+                  ) : hearDub ? (
+                    narrating ? 'Hearing it' : 'Hearing the dub'
+                  ) : narrating ? (
+                    'Hear it'
+                  ) : (
+                    'Hear the dub'
+                  )}
                 </button>
                 <small>
                   {dub.problem
                     ? dub.problem
                     : dub.working
-                      ? 'Preparing the voice…'
+                      ? `Speaking ${cues.length} ${cues.length === 1 ? 'line' : 'lines'}… ${dub.elapsed}s`
                       : hearDub
                         ? 'The original is muted. This is the whole video in that voice.'
-                        : 'Plays the whole video in the voice you picked.'}
+                        : narrating ? 'Reads your script aloud in the voice you picked.' : 'Plays the whole video in the voice you picked.'}
                 </small>
               </div>
             </div>
@@ -423,6 +542,33 @@ export function Captions({ s }: { s: Studio }) {
             </span>
 
             {/*
+             * How the caption moves, which is a separate decision from how it looks.
+             *
+             * Word-by-word is the short-form convention and what this shipped with — but it
+             * is a distraction on anything a viewer reads rather than skims, and there was no
+             * way to turn it off. Still is also the cheaper render: one image per line
+             * instead of one per word.
+             */}
+            <span className="ed-motion" role="group" aria-label="Caption motion">
+              <button
+                className="chip"
+                aria-pressed={s.captionKaraoke}
+                onClick={() => s.setCaptionKaraoke(true)}
+                title="Each word lights up as it is spoken"
+              >
+                Word by word
+              </button>
+              <button
+                className="chip"
+                aria-pressed={!s.captionKaraoke}
+                onClick={() => s.setCaptionKaraoke(false)}
+                title="The whole line stays still"
+              >
+                Still
+              </button>
+            </span>
+
+            {/*
              * The language-track picker lived here: a chip per language, burning a second set
              * of captions in under the first. It works — `POST /projects/{id}/tracks/{lang}`
              * and the stacked rasterizer are still there — but it was the loudest control on a
@@ -478,59 +624,120 @@ export function Captions({ s }: { s: Studio }) {
 
           <div className="ed-main">
             <div className="ed-stage">
-              <div
-                className="ed-video"
-                data-shape={shape}
-                // `cqmin` is 1% of the frame's smaller side, which is exactly what the
-                // rasterizer sizes from — so the caption here is the caption that burns in,
-                // at any preview size, with no measuring in JavaScript.
-                style={{
-                  ['--cap' as string]: s.captionScale,
-                  ['--lead' as string]: leading,
-                }}
-              >
-                {s.sourceVideo ? (
-                  <video
-                    ref={video}
-                    src={s.sourceVideo}
-                    playsInline
-                    onTimeUpdate={(e) => setAt(Math.round(e.currentTarget.currentTime * 1000))}
-                    onPlay={() => setPlaying(true)}
-                    onPause={() => setPlaying(false)}
-                  />
-                ) : (
-                  <div className="ed-novideo">
-                    <IconInfo size={20} />
-                    <span>The video is still uploading.</span>
-                  </div>
-                )}
-                {/*
-                 * Every burnt-in language, drawn where it will burn in — and draggable.
-                 *
-                 * Caption height was hardcoded at 16% from the bottom, which is right for a
-                 * talking head and wrong the moment the subject is in the lower third. Dragging
-                 * it here is the only way to judge it, because whether a caption is in the way
-                 * is a fact about *this* footage.
-                 */}
-                <Placement
-                  bottom={s.captionBottom}
-                  onMove={s.setCaptionBottom}
-                  empty={!live}
-                  hint={cues.length > 0}
+              {/*
+                * Sizes the frame to fit the row in *both* axes.
+                *
+                * The frame carries an aspect ratio and a height budget, and those two
+                * fought: `max-height` clamped the height while nothing clamped the width,
+                * so the box kept its width and stopped being the shape it claims to
+                * export — a 9:16 frame measured 1.4:1, landscape, on a short window. The
+                * video inside still sized itself against the *unclamped* height and hung
+                * up to 235px past the bottom of its own box, where `overflow: hidden` cut
+                * the picture off above the play bar.
+                *
+                * A size container is what lets the frame see the height it was given, so
+                * one dimension can be derived from the other instead of the two being
+                * declared independently and disagreeing.
+                */}
+              <div className="ed-fit">
+                <div
+                  className="ed-video"
+                  data-shape={shape}
+                  // `cqmin` is 1% of the frame's smaller side, which is exactly what the
+                  // rasterizer sizes from — so the caption here is the caption that burns in,
+                  // at any preview size, with no measuring in JavaScript.
+                  style={{
+                    ['--cap' as string]: s.captionScale,
+                    ['--lead' as string]: leading,
+                  }}
                 >
-                  {live
-                    ? tracks.map((code, i) => (
+                  {/*
+                   * What the frame shows, and it is not the same question on every lane.
+                   *
+                   * A lane that keeps the creator's footage previews that footage: the video is
+                   * the subject and the clock. A narrated video has no such thing — it is a
+                   * sequence of pictures, one per line, and the source is only the first of
+                   * them. Playing it linearly showed the whole clip running under captions cut
+                   * from a script, which is not the video that will be rendered.
+                   */}
+                  {/* The narration. Rendered rather than constructed, so it belongs to the
+                      tree that owns it and its state can be seen from outside this file. */}
+                  <audio ref={speech} hidden />
+
+                  {narrating ? (
+                    <div className="ed-plate">
+                      {/*
+                       * A still is drawn; a clip is played.
+                       *
+                       * Both arrive as `/assets/<uuid>` with no extension, so the kind comes
+                       * from the server. Handing an mp4 to `background-image` renders a black
+                       * frame and reports nothing — which is exactly what a creator saw after
+                       * narrating over a video clip.
+                       */}
+                      {beat?.pictureIsClip && beat.pictureUrl ? (
+                        <video
+                          key={beat.pictureUrl}
+                          ref={plate}
+                          src={beat.pictureUrl}
+                          muted
+                          loop
+                          playsInline
+                        />
+                      ) : beat?.pictureUrl ? (
                         <span
-                          key={code}
-                          className="ed-caption"
-                          data-sub={i > 0}
-                          style={styleOf(s.captionStyle)}
-                        >
-                          {lineIn(live, code, s.sourceLanguage)}
+                          className="ed-plate-still"
+                          style={{ backgroundImage: `url("${beat.pictureUrl}")` }}
+                        />
+                      ) : (
+                        <span className="ed-novideo">
+                          <IconInfo size={20} />
+                          <span>No picture on this line yet.</span>
                         </span>
-                      ))
-                    : null}
-                </Placement>
+                      )}
+                    </div>
+                  ) : s.sourceVideo ? (
+                    <video
+                      ref={video}
+                      src={s.sourceVideo}
+                      playsInline
+                      onTimeUpdate={(e) => setAt(Math.round(e.currentTarget.currentTime * 1000))}
+                      onPlay={() => setPlaying(true)}
+                      onPause={() => setPlaying(false)}
+                    />
+                  ) : (
+                    <div className="ed-novideo">
+                      <IconInfo size={20} />
+                      <span>The video is still uploading.</span>
+                    </div>
+                  )}
+                  {/*
+                   * Every burnt-in language, drawn where it will burn in — and draggable.
+                   *
+                   * Caption height was hardcoded at 16% from the bottom, which is right for a
+                   * talking head and wrong the moment the subject is in the lower third. Dragging
+                   * it here is the only way to judge it, because whether a caption is in the way
+                   * is a fact about *this* footage.
+                   */}
+                  <Placement
+                    bottom={s.captionBottom}
+                    onMove={s.setCaptionBottom}
+                    empty={!live}
+                    hint={cues.length > 0}
+                  >
+                    {live
+                      ? tracks.map((code, i) => (
+                          <span
+                            key={code}
+                            className="ed-caption"
+                            data-sub={i > 0}
+                            style={styleOf(s.captionStyle)}
+                          >
+                            {lineIn(live, code, s.sourceLanguage)}
+                          </span>
+                        ))
+                      : null}
+                  </Placement>
+                </div>
               </div>
 
               <div className="ed-transport">
@@ -726,19 +933,17 @@ function Row({
 
         <div className="ed-cue-lines">
           {tracks.map((code, t) => (
-            <textarea
+            <CueText
               key={code}
-              rows={1}
-              lang={code}
-              data-sub={t > 0}
-              value={lineIn(cue, code, spoken)}
+              code={code}
+              secondary={t > 0}
+              text={lineIn(cue, code, spoken)}
               // Only the primary is editable: the others are translations of it, and letting
               // them drift apart silently is how a bilingual track stops being bilingual.
-              readOnly={t > 0}
-              onChange={t === 0 ? (e) => onText(e.target.value) : undefined}
+              onText={t === 0 ? onText : undefined}
               onSelect={t === 0 ? catchSelection : undefined}
               onBlur={t === 0 ? () => setPicked('') : undefined}
-              aria-label={`Line ${index + 1}${t > 0 ? ` in ${code}` : ''}`}
+              label={`Line ${index + 1}${t > 0 ? ` in ${code}` : ''}`}
             />
           ))}
           {/*
@@ -1507,12 +1712,20 @@ function styleOf(id: string, keepSize = false): Record<string, string> {
 
 const DUB_WHY =
   'Your video comes back whole, in the voice you picked. The original speech is replaced.'
+const NARRATE_WHY =
+  'Your pictures, cut to the script and read aloud. One picture per line, in the order you added them.'
 const SUBTITLE_WHY =
   'Your video comes back whole, at its full length. Only the captions are drawn on.'
 
 type DubTrack = {
   /** Loading the first time, or after the voice changed. */
   working: boolean
+  /** Seconds spent preparing, so a long wait can say how long it has been. */
+  elapsed: number
+  /** The speech itself, so a lane with no video can use it as the clock. */
+  ref: React.RefObject<HTMLAudioElement | null>
+  /** True once there is audio loaded and playable. */
+  ready: boolean
   /** Why there is nothing to play, in words a creator can act on. */
   problem: string | null
 }
@@ -1533,33 +1746,45 @@ type DubTrack = {
  */
 function useDubTrack(
   video: React.RefObject<HTMLVideoElement | null>,
+  speech: React.RefObject<HTMLAudioElement | null>,
   { on, projectId, voice }: { on: boolean; projectId: string | null; voice: string | null },
 ): DubTrack {
   const [working, setWorking] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
   const [problem, setProblem] = useState<string | null>(null)
-  const audio = useRef<HTMLAudioElement | null>(null)
+  const [ready, setReady] = useState(false)
+  /*
+   * The speech is an element on the page, not a `new Audio()`.
+   *
+   * A detached element plays perfectly well and is invisible to everything else: it cannot be
+   * inspected, it is not torn down with the tree, and nothing outside this hook can tell
+   * whether the narration is actually running. Rendering it makes the preview's state
+   * observable — including to the person debugging it.
+   */
+  const audio = speech
 
   useEffect(() => {
     const el = video.current
-    if (!el) return
 
     if (!on || !projectId || !voice) {
       //: Give the original audio back on the way out. A screen that leaves the video muted
       //: after the toggle is off looks like it broke the video.
-      el.muted = false
+      if (el) el.muted = false
       audio.current?.pause()
-      audio.current = null
       setProblem(null)
+      setReady(false)
       return
     }
 
+    const track = audio.current
+    if (!track) return
+
     let dropped = false
     let objectUrl: string | null = null
-    const track = new Audio()
-    audio.current = track
-    el.muted = true
+    if (el) el.muted = true
     setWorking(true)
     setProblem(null)
+    setReady(false)
 
     //: Synthesis takes a while the first time each voice is heard — it is the whole video,
     //: one request per line — so the picture keeps playing and the speech joins when it is
@@ -1573,17 +1798,36 @@ function useDubTrack(
         }
         objectUrl = url
         track.src = url
-        track.currentTime = el.currentTime
+        if (el) track.currentTime = el.currentTime
         setWorking(false)
-        if (!el.paused) void track.play().catch(() => {})
+        setReady(true)
+        if (el && !el.paused) void track.play().catch(() => {})
       })
-      .catch(() => {
+      .catch((why: unknown) => {
         if (dropped) return
         setWorking(false)
         //: The video is audible again rather than left silent behind a dub that never came.
-        el.muted = false
-        setProblem('That voice could not be prepared. Try another, or try again.')
+        if (el) el.muted = false
+        setProblem(why instanceof Error ? why.message : 'The voice could not be prepared.')
       })
+
+    /*
+     * Two modes, and which one applies is decided by whether there is a picture to follow.
+     *
+     * With a video the picture is the clock and the speech chases it — video seeks are
+     * expensive and land on keyframes, so driving it the other way stutters. A narrated
+     * project has no video at all: its pictures are stills swapped at beat boundaries, so
+     * there is nothing to chase and the speech *is* the clock. The hook used to require a
+     * video element and returned immediately without one, which is why "Hear it" silently
+     * did nothing on this lane.
+     */
+    if (!el) {
+      return () => {
+        dropped = true
+        track.pause()
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+      }
+    }
 
     const play = () => {
       track.currentTime = el.currentTime
@@ -1608,9 +1852,26 @@ function useDubTrack(
       el.muted = false
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [on, projectId, voice, video])
+  }, [on, projectId, voice, video, audio])
 
-  return { working, problem }
+  /*
+   * Count the wait out loud.
+   *
+   * Preparing a narration is one speech request per line against a per-minute quota, so a
+   * thirty-line script is minutes, not seconds. A label that never changes is
+   * indistinguishable from a hang. A number that moves is proof it is still alive.
+   */
+  useEffect(() => {
+    if (!working) {
+      setElapsed(0)
+      return
+    }
+    const started = Date.now()
+    const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(tick)
+  }, [working])
+
+  return { working, problem, elapsed, ref: audio, ready }
 }
 
 /**
@@ -1650,4 +1911,77 @@ function burntIn(cue: Cue, language: string | undefined): string {
 
 function rushedAt(text: string, cps: number, windowMs: number): boolean {
   return windowMs * PACE_TOLERANCE < readableMs(text, cps)
+}
+
+/**
+ * One editable caption line.
+ *
+ * Its own component because of the caret.
+ *
+ * The textarea used to be driven straight from server state: every keystroke fired a mutation,
+ * the mutation invalidated the plan, the plan came back, and the `value` prop was replaced
+ * mid-word — which makes React re-set the element's value and drop the caret at the end. You
+ * type three characters into the middle of a line and the next one lands at the end of it.
+ *
+ * It is worst in Burmese and Thai, and not because of the fix — because those scripts have no
+ * word spaces, so editing *is* placing the caret inside a cluster, every time.
+ *
+ * So the field owns its text while it has focus, and accepts the server's version only when it
+ * does not. The edit still saves on every keystroke; what stops is the round trip reaching back
+ * in and moving the cursor.
+ */
+function CueText({
+  code,
+  text,
+  secondary,
+  label,
+  onText,
+  onSelect,
+  onBlur,
+}: {
+  code: string
+  text: string
+  secondary: boolean
+  label: string
+  onText?: (text: string) => void
+  onSelect?: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void
+  onBlur?: () => void
+}) {
+  const [draft, setDraft] = useState(text)
+  const focused = useRef(false)
+
+  //: Someone else's change — a re-transcription, a translation, the pace fix rewriting a line
+  //: — still lands, as long as this field is not the one being typed into.
+  useEffect(() => {
+    if (!focused.current) setDraft(text)
+  }, [text])
+
+  return (
+    <textarea
+      rows={1}
+      lang={code}
+      data-sub={secondary}
+      value={focused.current ? draft : text}
+      readOnly={secondary}
+      onFocus={() => {
+        focused.current = true
+        setDraft(text)
+      }}
+      onChange={
+        onText
+          ? (e) => {
+              setDraft(e.target.value)
+              onText(e.target.value)
+            }
+          : undefined
+      }
+      onSelect={onSelect}
+      onBlur={() => {
+        focused.current = false
+        setDraft(text)
+        onBlur?.()
+      }}
+      aria-label={label}
+    />
+  )
 }

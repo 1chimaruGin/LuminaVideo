@@ -106,9 +106,9 @@ const TAKES: Record<string, Takes> = {
   },
   narrate: {
     required: true,
-    accept: 'video/*',
-    invite: 'Choose the footage',
-    hint: 'What plays underneath. It loops if your script runs longer.',
+    accept: 'image/*,video/*',
+    invite: 'Add pictures',
+    hint: 'Pictures or clips. One shows per line of your script.',
     script: true,
   },
 }
@@ -117,6 +117,14 @@ const TAKES: Record<string, Takes> = {
 function Ask({ s, spec }: { s: Studio; spec: (typeof RECIPES)[number] }) {
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  /*
+   * The pictures a narrated video is cut from, in the order they were picked.
+   *
+   * A list because this lane is a sequence rather than a backdrop — real faceless video
+   * changes visual every few seconds, so a three-minute script wants dozens. They cycle if
+   * there are fewer than there are lines, which reads as a motif rather than a gap.
+   */
+  const [shots, setShots] = useState<File[]>([])
   const [words, setWords] = useState<File | null>(null)
   const [over, setOver] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
@@ -191,10 +199,13 @@ function Ask({ s, spec }: { s: Studio; spec: (typeof RECIPES)[number] }) {
   const scripted = Boolean(takes.script)
 
   const ready = takes.required
-    ? hasVideo && (scripted ? Boolean(text.trim()) : !needsWords || Boolean(words))
+    ? (scripted ? shots.length > 0 || hasVideo : hasVideo) &&
+      (scripted ? Boolean(text.trim()) : !needsWords || Boolean(words))
     : Boolean(text.trim() || file)
   //: What is still missing, in the order it is asked for.
-  const waiting = !hasVideo
+  const waiting = scripted && !shots.length && !hasVideo
+    ? 'Add some pictures'
+    : !hasVideo && !scripted
     ? (WAITING[spec.id] ?? 'Add something')
     : scripted && !text.trim()
       ? 'Write the script'
@@ -239,6 +250,9 @@ function Ask({ s, spec }: { s: Studio; spec: (typeof RECIPES)[number] }) {
       //: Nothing to send when the video is already here — that is the whole point of the
       //: picker, and re-uploading it would be the slowest step in the product done twice.
       const source = file ? await upload.mutateAsync(file) : null
+      //: Uploaded in order, because the order is the edit: picture one plays under line one.
+      const pool: string[] = []
+      for (const shot of shots) pool.push((await upload.mutateAsync(shot)).asset_id)
       const script = words ? await upload.mutateAsync(words) : null
       setPhase('working')
       const plan = await create.mutateAsync({
@@ -257,6 +271,7 @@ function Ask({ s, spec }: { s: Studio; spec: (typeof RECIPES)[number] }) {
         language: takes.required ? into : s.language,
         source_language: takes.required && !scripted ? spoken : null,
         source_asset_id: source?.asset_id ?? reused?.assetId ?? null,
+        source_asset_ids: pool.length ? pool : reused ? [reused.assetId] : [],
         transcript_asset_id: script?.asset_id ?? null,
       })
       s.setProjectId(plan.project_id)
@@ -498,28 +513,49 @@ function Ask({ s, spec }: { s: Studio; spec: (typeof RECIPES)[number] }) {
           onChange={(e) => setText(e.target.value)}
         />
 
+        {/*
+         * The pictures, as a strip along the bottom of the composer.
+         *
+         * Shown rather than counted: the order is the edit — picture one plays under line one
+         * — so it has to be visible and, later, draggable. A number ("3 files") tells the
+         * creator nothing about what their video will look like.
+         */}
+        {scripted && shots.length ? (
+          <div className="shots" role="list">
+            {shots.map((shot, i) => (
+              <span className="shot" role="listitem" key={`${shot.name}-${i}`}>
+                <b>{i + 1}</b>
+                <small>{shot.name}</small>
+                <button
+                  className="shot-drop"
+                  aria-label={`Remove ${shot.name}`}
+                  onClick={() => setShots((was) => was.filter((_, at) => at !== i))}
+                >
+                  <IconClose size={13} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         {/* Attaching is a control on the composer, not a panel of its own. */}
         {scripted ? (
           <div className="composer-foot">
-            <button
-              className="composer-attach"
-              onClick={() => picker.current?.click()}
-              disabled={Boolean(file || reused)}
-            >
+            <button className="composer-attach" onClick={() => picker.current?.click()}>
               <IconPaperclip size={16} />
-              {takes.invite}
+              {shots.length ? 'Add more pictures' : takes.invite}
             </button>
             {mine.length ? (
-              <button
-                className="composer-attach"
-                onClick={() => setBrowsing(true)}
-                disabled={Boolean(file || reused)}
-              >
+              <button className="composer-attach" onClick={() => setBrowsing(true)}>
                 <IconFilm size={16} />
                 From your videos
               </button>
             ) : null}
-            <small>{takes.hint}</small>
+            <small>
+              {shots.length
+                ? `${shots.length} ${shots.length === 1 ? 'picture' : 'pictures'} · one shows per line, repeating if the script is longer`
+                : takes.hint}
+            </small>
           </div>
         ) : takes.required ? null : (
           <div className="composer-foot">
@@ -539,8 +575,21 @@ function Ask({ s, spec }: { s: Studio; spec: (typeof RECIPES)[number] }) {
           ref={picker}
           type="file"
           hidden
+          multiple={scripted}
           accept={takes.accept}
-          onChange={(e) => attach(e.target.files?.[0])}
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? [])
+            if (scripted) {
+              //: Appended, not replaced. Choosing pictures is a thing people do in several
+              //: goes — a few from one folder, a few from another — and a picker that
+              //: forgets the first batch makes them start over.
+              setShots((was) => [...was, ...picked])
+              setFailed(null)
+            } else {
+              attach(picked[0])
+            }
+            if (picker.current) picker.current.value = ''
+          }}
         />
       </div>
 
@@ -1017,7 +1066,7 @@ const ASKS: Record<string, string> = {
 const WAITING: Record<string, string> = {
   explainer: 'Describe it first',
   dub: 'Drop your video first',
-  narrate: 'Choose the footage first',
+  narrate: 'Add some pictures',
   clip_long_video: 'Drop your video first',
   subtitle_only: 'Drop your video first',
 }

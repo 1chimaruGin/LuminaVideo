@@ -144,7 +144,23 @@ export async function fetchDubPreview(projectId: string, voice: string): Promise
     `${BASE}/projects/${projectId}/dub-preview?voice=${encodeURIComponent(voice)}`,
     { headers: token ? { Authorization: `Bearer ${token}` } : {} },
   )
-  if (!res.ok) throw new Error(`dub preview failed (${res.status})`)
+  if (!res.ok) {
+    /*
+     * Carry the server's own sentence, not a status code.
+     *
+     * The API distinguishes these carefully — a quota that refills in a minute, a voice that
+     * does not exist, no voice chosen yet, no engine configured — and every one of them was
+     * being collapsed into "That voice could not be prepared. Try another." Telling someone
+     * to try another voice when the real answer is "your key's speech quota ran out, it
+     * refills every minute" sends them round a loop that cannot work.
+     */
+    const said = await res
+      .clone()
+      .json()
+      .then((body: { detail?: string }) => body.detail)
+      .catch(() => null)
+    throw new Error(said || `The voice could not be prepared (${res.status}).`)
+  }
   return URL.createObjectURL(await res.blob())
 }
 

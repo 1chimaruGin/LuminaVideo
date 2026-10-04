@@ -135,6 +135,7 @@ export type NewProject = {
     language?: string;
     source_language?: string | null;
     voice_id?: string | null;
+    source_asset_ids?: Array<string>;
     title?: string | null;
     target_ms?: number;
     source_asset_id?: string | null;
@@ -149,6 +150,7 @@ export type NewRender = {
     caption_style?: string;
     caption_bottom?: number;
     caption_scale?: number;
+    caption_karaoke?: boolean;
 };
 
 /**
@@ -178,6 +180,7 @@ export type PlanOut = {
     caption_languages?: Array<string>;
     keeps_whole_source?: boolean;
     recipe?: string;
+    written_by_us?: Array<number>;
     source_asset_id?: string | null;
     moments?: Array<Moment>;
     language?: string;
@@ -252,7 +255,6 @@ export type RecipeOut = {
     id: string;
     stages: Array<string>;
     needs_source: boolean;
-    original_visuals_only: boolean;
 };
 
 export type RenderOut = {
@@ -308,6 +310,7 @@ export type SceneOut = {
     state: string;
     error: string | null;
     preview_asset_id: string | null;
+    picture_is_clip?: boolean;
     final_asset_id: string | null;
     vo_asset_id: string | null;
     spoken_language?: string | null;

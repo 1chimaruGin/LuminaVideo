@@ -96,6 +96,41 @@ STYLES: dict[str, Style] = {
         base="color:#fff;font-weight:700;text-shadow:0 0 .5em rgba(150,200,255,.95)",
         highlight="color:#ffc36b;text-shadow:0 0 .6em rgba(255,195,107,.95)",
     ),
+    #: A hard outline instead of a plate. Reads on any footage without covering it, which is
+    #: the case a filled plate handles badly — a plate over a face hides the face.
+    "outline": Style(
+        base=(
+            "color:#fff;font-weight:800;letter-spacing:-.01em;"
+            "-webkit-text-stroke:.055em #05070f;paint-order:stroke fill"
+        ),
+        highlight="color:#ffc36b",
+    ),
+    #: Documentary lower-third: quiet, wide, and clearly not trying to be a meme.
+    "news": Style(
+        base=(
+            "background:rgba(6,8,16,.9);color:#f2f5ff;padding:.32em .7em;border-radius:0;"
+            "border-left:.18em solid #ffc36b;font-weight:550;letter-spacing:.005em"
+        ),
+        highlight="color:#ffc36b",
+    ),
+    #: The karaoke look this style exists for: the spoken word gets the plate, not the line.
+    #: Only meaningful with word timing, and it degrades to plain white when held static.
+    "spot": Style(
+        base="color:#fff;font-weight:800;letter-spacing:-.01em;text-shadow:0 .06em .3em #000",
+        highlight=(
+            "background:#ffc36b;color:#1d1204;padding:.1em .22em;border-radius:.18em;"
+            "text-shadow:none"
+        ),
+    ),
+    #: For footage that is already bright. A light plate is the one thing none of the others
+    #: offer, and white video with white captions is the commonest unreadable combination.
+    "paper": Style(
+        base=(
+            "background:rgba(248,248,245,.94);color:#14161c;padding:.28em .55em;"
+            "border-radius:.22em;font-weight:700"
+        ),
+        highlight="color:#a4610d",
+    ),
 }
 
 #: How present the mark is. Legible on any footage, and not competing with the video: this is
@@ -145,11 +180,18 @@ async def rasterize(
     language: str = "en",
     bottom: float = 0.16,
     scale: float = 1.0,
+    karaoke: bool = True,
 ) -> list[CaptionState]:
     """Render every caption state to a transparent PNG.
 
     One state per highlighted unit: the picture only changes when the highlight moves, so
     that is the only time a new image is needed.
+
+    `karaoke=False` draws each line once, whole and unhighlighted, and holds it for the line's
+    duration. Not every video wants the word-by-word treatment — it is the convention on
+    short-form, and it is a distraction on a documentary or anything a viewer is reading
+    rather than skimming. It is also far cheaper: a forty-word line is one image instead of
+    forty, and one entry in the overlay graph instead of forty.
 
     Typography comes from the language pack, not from a default argument. The face, the line
     height, the tracking and — most importantly — whether units are separated by a space are
@@ -191,7 +233,26 @@ async def rasterize(
 
         for li, line in enumerate(lines):
             steps = line.words or [(line.text, 0)]
-            for wi, (_, offset) in enumerate(steps):
+            #: Each state as (which unit is lit, when it appears, when it goes).
+            #:
+            #: Spelled out rather than derived from the loop index, because the static case has
+            #: no index to derive from: a sentinel of -1 fed straight back into the "where does
+            #: the next unit start" lookup, which answered *the first one* — so a still caption
+            #: was on screen for the 60ms floor and gone. It flashed, and nothing failed.
+            if karaoke:
+                plan = [
+                    (
+                        wi,
+                        line.start_ms + offset,
+                        line.start_ms + steps[wi + 1][1] if wi + 1 < len(steps) else line.end_ms,
+                    )
+                    for wi, (_, offset) in enumerate(steps)
+                ]
+            else:
+                #: One picture, nothing lit, held for the whole line.
+                plan = [(-1, line.start_ms, line.end_ms)]
+
+            for si, (wi, start, end) in enumerate(plan):
                 html = joiner.join(
                     f'<span class="w{" on" if j == wi else ""}">{_escape(w)}</span>'
                     for j, (w, _) in enumerate(steps)
@@ -228,12 +289,9 @@ async def rasterize(
                 # fallback face — the exact failure this whole approach exists to avoid.
                 await page.evaluate("document.fonts.ready")
 
-                png = out_dir / f"cap-{li:03d}-{wi:03d}.png"
+                png = out_dir / f"cap-{li:03d}-{si:03d}.png"
                 await page.screenshot(path=str(png), omit_background=True)
 
-                start = line.start_ms + offset
-                nxt = steps[wi + 1][1] if wi + 1 < len(steps) else None
-                end = line.start_ms + nxt if nxt is not None else line.end_ms
                 states.append(CaptionState(png=png, start_ms=start, end_ms=max(end, start + 60)))
 
         await browser.close()

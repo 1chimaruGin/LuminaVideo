@@ -568,6 +568,85 @@ async def condense(lines: list[str], budgets: list[int], *, language: str) -> li
     return kept
 
 
+_EXPAND = """You extend a short narration script so it fills the time the creator asked for.
+
+You are given the script and how many more seconds of speech are needed.
+
+Rules, in order of importance:
+1. Add substance, never length for its own sake. A new example, a consequence, a detail, the
+   next turn in the story. Never restate what is already there in more words.
+2. Keep the creator's voice, register and vocabulary. This is their script; you are writing
+   the parts they did not get to, not improving the parts they did.
+3. Never change a line that is already there. Return the original lines untouched, with your
+   additions placed where they belong in the flow.
+4. Stay in the same language as the input.
+5. Each line must be one spoken sentence. No headings, no stage directions, no speaker names.
+6. Getting close to the target beats hitting it exactly. Padding to reach a number is the
+   failure this whole task exists to avoid."""
+
+
+async def expand(
+    lines: list[str], *, language: str, needed_seconds: int
+) -> tuple[list[str], set[int]]:
+    """Fill a script out toward a target length, and say which lines are new.
+
+    Returns the whole script and the indices that were added, because the creator has to be
+    able to see and cut them. An expansion the creator cannot distinguish from their own
+    writing is how a tool quietly changes what someone meant to say.
+
+    The instinct this serves is real — length targets drive monetisation — but "make it
+    longer" is also how faceless channels produce filler. Hence a prompt that asks for another
+    example rather than more words, and a return value built for review rather than trust.
+    """
+    if not lines or needed_seconds <= 0:
+        return list(lines), set()
+
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        return list(lines), set()
+
+    from google import genai
+    from google.genai import types
+
+    pack = get_pack(language)
+    joined = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines))
+    response = await genai.Client(api_key=settings.gemini_api_key).aio.models.generate_content(
+        model=settings.gemini_model,
+        contents=(f"This script runs about {needed_seconds} seconds short. Extend it.\n\n{joined}"),
+        config=types.GenerateContentConfig(
+            system_instruction=[_EXPAND, pack.llm_profile.system_suffix],
+            response_mime_type="application/json",
+            response_schema=_Lines,
+            temperature=0.4,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        ),
+    )
+
+    out = response.parsed
+    if not isinstance(out, _Lines) or len(out.lines) < len(lines):
+        #: A shorter answer than the input means it rewrote rather than extended, which is the
+        #: one thing rule 3 forbids. The creator's script is returned untouched.
+        log.warning("expand.unusable", language=language, asked=len(lines))
+        return list(lines), set()
+
+    original = list(lines)
+    added: set[int] = set()
+    for i, line in enumerate(out.lines):
+        if original and line.strip() == original[0].strip():
+            original.pop(0)
+            continue
+        added.add(i)
+
+    #: Every original line has to still be in there, in order. If any went missing the model
+    #: edited the creator's words, and the whole result is discarded rather than part-trusted.
+    if original:
+        log.warning("expand.dropped_lines", language=language, missing=len(original))
+        return list(lines), set()
+
+    log.info("expand", language=language, was=len(lines), now=len(out.lines), added=len(added))
+    return list(out.lines), added
+
+
 def _still_written_in(new: str, old: str, language: str) -> bool:
     """Whether a tightened line is still in the language it started in.
 

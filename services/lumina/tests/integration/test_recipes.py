@@ -903,3 +903,25 @@ async def test_narrate_makes_a_video_as_long_as_the_script_takes_to_say(ctx, ses
         f"video is {probe.duration_ms}ms but the narration is {spoken_ms}ms"
     )
     assert await _loudness(rendered) > -60, "the narration is silent"
+
+
+async def test_still_captions_draw_one_state_a_line_not_one_a_word(tmp_path):
+    """The export shipped with word-by-word highlighting and no way to turn it off.
+
+    It is the short-form convention and a distraction on anything a viewer reads rather than
+    skims. Turning it off is also the cheaper render — a state is a rasterised PNG and an
+    entry in the overlay graph, so a ten-word line costs ten of each to say the same thing.
+    """
+    line = captions.word_timings("One two three four five", 0, 4000, get_pack("en"))
+
+    moving = await captions.rasterize([line], tmp_path / "a", width=540, height=960, style="pop")
+    still = await captions.rasterize(
+        [line], tmp_path / "b", width=540, height=960, style="pop", karaoke=False
+    )
+
+    assert len(moving) == len(line.words), "one state per word is what karaoke means"
+    assert len(still) == 1, f"a still line is one picture, got {len(still)}"
+
+    #: And it is on screen for the whole line, not for one word's worth of it.
+    assert still[0].start_ms == line.start_ms
+    assert still[0].end_ms - still[0].start_ms == 4000

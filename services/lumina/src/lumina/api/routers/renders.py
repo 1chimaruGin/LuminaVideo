@@ -97,6 +97,7 @@ async def start_render(project_id: uuid.UUID, body: NewRender, session: Session)
                 "style": body.caption_style,
                 "caption_bottom": body.caption_bottom,
                 "caption_scale": body.caption_scale,
+                "caption_karaoke": body.caption_karaoke,
                 "render_id": str(render.id),
             },
             project=project.id,

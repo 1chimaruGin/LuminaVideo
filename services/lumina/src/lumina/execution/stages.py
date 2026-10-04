@@ -377,6 +377,10 @@ async def captions(ctx: Ctx, payload: dict[str, Any]) -> dict[str, Any]:
     # Where the creator dragged the caption to, as a share of the frame from the bottom.
     bottom = float(payload.get("caption_bottom", 0.16))
     scale = float(payload.get("caption_scale", 1.0))
+    #: Word-by-word highlighting, or the whole line held still. The first is the short-form
+    #: convention; the second is what a documentary or anything read rather than skimmed
+    #: wants — and it is the cheaper of the two by a factor of the words in a line.
+    karaoke = bool(payload.get("caption_karaoke", True))
 
     # Where each caption sits in the finished video, and the two lanes disagree about it.
     #
@@ -431,6 +435,7 @@ async def captions(ctx: Ctx, payload: dict[str, Any]) -> dict[str, Any]:
             language=primary,
             bottom=bottom,
             scale=scale,
+            karaoke=karaoke,
         )
         stored = [
             {
@@ -498,6 +503,9 @@ async def plan(ctx: Ctx, payload: dict[str, Any]) -> dict[str, Any]:
             "recipe": drafted.recipe.value,
             "language": drafted.language,
             "aspects": [a.value for a in drafted.aspects],
+            #: Indices of lines the planner added rather than the creator writing them.
+            #: Carried on the plan so it survives a reload — see `written_by_us` in the API.
+            "written_by_us": payload.get("written_by_us") or [],
         },
     )
     ctx.session.add(row)
@@ -826,7 +834,14 @@ async def compose(ctx: Ctx, payload: dict[str, Any]) -> dict[str, Any]:
         #: subject: looped if the script outruns it, cut short if it does not. The scenes are
         #: emptied for the same reason the whole-source lane empties them — there is one clip,
         #: not one per line — but the reason differs, so the two paths stay separate.
-        if narrated:
+        #: A bed is the *fallback*, not the design.
+        #:
+        #: Real faceless video changes visual every three to six seconds, so a narrated video
+        #: is normally a sequence: one picture per beat, each held for as long as its line
+        #: takes to say. Looping a single clip under the whole thing is right for exactly one
+        #: genre — narration over gameplay — and reads as low effort everywhere else. So the
+        #: bed runs only when the creator gave nothing to cut to.
+        if narrated and not any(s.preview_asset_id or s.final_asset_id for s in scenes):
             if source is None:
                 raise ValueError("nothing to narrate over")
             spoken_ms = sum(s.duration_ms for s in scenes)
@@ -856,6 +871,23 @@ async def compose(ctx: Ctx, payload: dict[str, Any]) -> dict[str, Any]:
             asset_id = scene.final_asset_id or scene.preview_asset_id
             if asset_id is None:
                 raise ValueError(f"scene {scene.index} has no picture to compose")
+
+            #: A beat's picture may be a clip the creator uploaded rather than a still.
+            #:
+            #: Ken Burns takes a frame, so a video handed to it would be decoded as a single
+            #: image — the first frame, held silently for the whole beat. Cut to length and
+            #: looped if the beat outlasts it, which is what `bed` already does.
+            picture = await ctx.session.get(Asset, asset_id)
+            if picture is not None and picture.kind == AssetKind.VIDEO.value:
+                shot = work / f"shot-{i:03d}.mp4"
+                shot.write_bytes(await ctx.assets.read(asset_id))
+                clips.append(
+                    await ffmpeg.bed(
+                        shot, work / f"clip-{i:03d}.mp4", ms=scene.duration_ms, size=size
+                    )
+                )
+                continue
+
             frame = work / f"frame-{i:03d}.png"
             frame.write_bytes(await ctx.assets.read(asset_id))
             clips.append(

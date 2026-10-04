@@ -40,6 +40,10 @@ export type Scene = {
    */
   spokenLanguage: string | null
   media: string
+  /** The beat's picture as a plain URL, or null while it has none. */
+  pictureUrl: string | null
+  /** True when that picture is a clip: it has to be played, not drawn. */
+  pictureIsClip: boolean
   status: SceneStatus
   selected: boolean
   busy: boolean
@@ -66,6 +70,26 @@ export const CAPTION_STYLES = [
     id: 'glow',
     name: 'Soft glow',
     css: 'color:#fff;font:600 15px/1 var(--ui);text-shadow:0 0 14px rgba(160,200,255,.9)',
+  },
+  {
+    id: 'outline',
+    name: 'Outline',
+    css: 'color:#fff;font:800 15px/1 var(--ui);-webkit-text-stroke:0.8px #05070f;paint-order:stroke fill',
+  },
+  {
+    id: 'news',
+    name: 'Lower third',
+    css: 'background:rgba(6,8,16,.9);color:#f2f5ff;padding:5px 11px;border-left:3px solid var(--accent);font:550 15px/1 var(--ui)',
+  },
+  {
+    id: 'spot',
+    name: 'Word spot',
+    css: 'color:#fff;font:800 15px/1 var(--ui);text-shadow:0 1px 5px #000',
+  },
+  {
+    id: 'paper',
+    name: 'Paper',
+    css: 'background:rgba(248,248,245,.94);color:#14161c;padding:5px 10px;border-radius:7px;font:700 15px/1 var(--ui)',
   },
 ]
 

@@ -732,6 +732,12 @@ h1.big {
   margin-bottom: 16px;
 }
 .chip {
+  /* Laid out as a row so a chip can carry a spinner beside its label without the two
+     stacking or the text shifting off centre. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   height: 38px;
   padding: 0 15px;
   border-radius: 999px;
@@ -2787,7 +2793,14 @@ h1.big {
 }
 
 /* Each swatch drawn in the style it selects — three names cannot be compared. */
+/*
+ * `.ed-motion` shares the row but not the swatch sizing. It sat on `.ed-styles`, whose
+ * buttons are a fixed 46px square with `overflow: hidden` — right for an "Aa" drawn in a
+ * typeface, wrong for a label: "Word by word" wrapped to three lines inside the square and
+ * was cut to "Word by". Its buttons are plain chips, which size to their text.
+ */
 .ed-styles,
+.ed-motion,
 .ed-shift {
   display: flex;
   align-items: center;
@@ -2879,48 +2892,78 @@ h1.big {
  * The caption on this preview is therefore the caption that burns in, at any preview size,
  * with nothing measured in JavaScript and nothing to drift.
  */
-.ed-video {
+/*
+ * The row the frame is fitted into, and the reason it can be fitted at all.
+ *
+ * Fitting a fixed ratio inside a box needs both of that box's dimensions at once — the
+ * height decides the width for a tall frame, the width decides the height for a wide one.
+ * A percentage cannot express that: `max-width: 100%` resolves against the parent's width
+ * and `max-height: 100%` against its height, so declaring both lets each clamp its own axis
+ * without telling the other, and the ratio breaks. Container query units resolve against the
+ * same box on both axes, which is what makes `min()` between them meaningful.
+ */
+.ed-fit {
   /* As tall as the stage row actually offers: the vertical frame is the one that
-     needs it, and it was leaving most of a wide column empty. */
+     needs it, and it was leaving most of a wide column empty. Declared here rather than on
+     the frame because the container is what has to be measurable — the frame reads it back
+     through `100cqh`. */
   --out-h: min(64vh, 640px);
+  container-type: size;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ed-video {
+  /* The export ratio as a number, because it is arithmetic here rather than a declaration:
+     the two sides are computed from each other, so only one of them may be stated. */
+  --arn: calc(9 / 16);
+
+  /*
+   * Contain, not clamp. The height is the smaller of the row and the viewport budget; the
+   * width is the smaller of the row and what that height allows at this ratio; and the height
+   * is then re-derived from the width that survived. Whichever axis runs out first decides
+   * both, so the frame is always exactly the shape being exported.
+   *
+   * Stating `width` and `height` from a single source is what keeps it honest. `aspect-ratio`
+   * alongside independent `max-width`/`max-height` is the version this replaced, and there the
+   * clamps contradicted each other: a short window kept the full width, dropped the height,
+   * and drew a 9:16 export as a 1.4:1 landscape box.
+   */
+  --fit-h: min(100cqh, var(--out-h));
+  --fit-w: min(100cqw, calc(var(--fit-h) * var(--arn)));
+  width: var(--fit-w);
+  height: calc(var(--fit-w) / var(--arn));
+
   container-type: size;
   position: relative;
   display: grid;
   place-items: center;
-  justify-self: center;
-  align-self: center;
-  width: 100%;
   min-height: 0;
   overflow: hidden;
   border-radius: var(--r);
   border: 1px solid var(--line);
   background: #05070f;
-  aspect-ratio: 9 / 16;
-  max-width: min(100%, calc(var(--out-h) * 9 / 16));
-  /*
-   * Capped by the row as well as by the viewport.
-   *
-   * `--out-h` alone is a promise about the window, not about the space this row was actually
-   * given — so on a short window the frame grew past its row and sat on top of the play button
-   * and the clock underneath it. `100%` is the row; whichever is smaller wins.
-   */
-  max-height: min(var(--out-h), 100%);
 }
 
 .ed-video[data-shape='1:1'] {
-  aspect-ratio: 1;
-  max-width: min(100%, var(--out-h));
+  --arn: 1;
 }
 
 .ed-video[data-shape='16:9'] {
-  aspect-ratio: 16 / 9;
-  max-width: min(100%, calc(var(--out-h) * 16 / 9));
+  --arn: calc(16 / 9);
 }
 
 /* `cover`, because ffmpeg crops to fill rather than letterboxing — bars on a Short read as
    reposted content, and every platform's algorithm treats them accordingly. Previewing with
    `contain` showed a frame the export never produces. */
 .ed-video video {
+  /* Absolute, so the percentages resolve against the frame's padding box — the size it was
+     actually given. As an in-flow grid item it sized itself against the ratio-derived height
+     the frame had already been denied, and overflowed the bottom of its own box. */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -3685,7 +3728,9 @@ h1.big {
   top: 0;
   z-index: 1;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  /* Pinned, not `auto`: the header and the rows must resolve to the same tracks, and `auto`
+     sizes each to its own content — the words "IN OUT LENGTH" here, timecodes below. */
+  grid-template-columns: 30px minmax(0, 1fr) 200px;
   gap: 10px;
   padding: 10px 8px 8px;
   background: rgba(8, 11, 24, 0.96);
@@ -3733,8 +3778,20 @@ h1.big {
  * scannable — the previous rows were tall enough that five fitted in a tall window.
  */
 .ed-cue {
+  /*
+   * Three columns, and exactly three children — the header above declares `# | LINE | IN OUT
+   * LENGTH` and the row has to be the same shape or it is not a table.
+   *
+   * It had four: the remove button sat between the number and the text, so it took the LINE
+   * column, the text was pushed into the times column, and the timecodes wrapped onto a
+   * second row under the number. Measured, the header's columns were 30/409/168 and the
+   * row's were 30/114/461 — nothing lined up with the heading above it. The button is lifted
+   * out of the grid below rather than given a fourth column, because it is a control on the
+   * row, not a field of it.
+   */
+  position: relative;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr) 200px;
   align-items: start;
   gap: 10px;
   padding: 7px 8px;
@@ -3967,10 +4024,18 @@ h1.big {
     padding-bottom: 10px;
   }
 
-  /* A smaller height budget, not a fixed height: `height` fought the `aspect-ratio` and the
-     9:16 preview came out landscape — the one shape it most needs to be right about. */
-  .ed-video {
+  /*
+   * A smaller height budget, and here it has to be a height as well.
+   *
+   * In this layout the stage is an `auto` row, so nothing above tells the container how tall
+   * it is — and a size container with an indefinite height reports `0`, which collapsed the
+   * frame to a two-pixel square. Stating the budget as the height breaks that circle: the
+   * container is definite, the frame reads it back, and the width still follows from the
+   * ratio rather than being declared against it.
+   */
+  .ed-fit {
     --out-h: min(42vh, 340px);
+    height: var(--out-h);
   }
 
   .ed-list {
@@ -4566,6 +4631,19 @@ h1.big {
  * a list of forty does not read as forty invitations to delete something.
  */
 .ed-drop {
+  /*
+   * Lifted out of the row's grid — see `.ed-cue`. It is a control on the row, not a column of
+   * it, and leaving it in the flow shifted every field one place to the right.
+   *
+   * Hidden until the row is hovered or the button is focused, so thirty rows are thirty lines
+   * of text rather than thirty delete buttons; `focus-visible` keeps it reachable by keyboard.
+   */
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.14s ease;
   flex: none;
   width: 22px;
   height: 22px;
@@ -4584,6 +4662,11 @@ h1.big {
 }
 
 .ed-cue:hover .ed-drop,
+.ed-cue:hover .ed-drop,
+.ed-drop:focus-visible {
+  opacity: 1;
+}
+
 .ed-drop:focus-visible {
   opacity: 1;
 }
@@ -4920,6 +5003,169 @@ h1.big {
   initial-value: 0deg;
 }
 
+/* ============================================================================
+ * The rim light.
+ *
+ * The aurora edge, lifted off the writing console so every surface in the product can wear
+ * it. Applied to the *large* surfaces only — a panel, a card, a frame — and never to chips,
+ * tags or buttons: forty rotating gradients is not a style, it is a strobe, and each one
+ * repaints its gradient every frame.
+ * ========================================================================== */
+
+.rim {
+  position: relative;
+  border-color: transparent;
+}
+
+.rim::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--spin),
+    rgba(255, 195, 107, 0.7),
+    rgba(122, 162, 255, 0.42),
+    rgba(196, 132, 255, 0.46),
+    rgba(110, 231, 168, 0.34),
+    rgba(255, 195, 107, 0.7)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: spin-ring 18s linear infinite;
+  opacity: 0.55;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/*
+ * Every large surface wears it.
+ *
+ * Listed rather than applied through a class on each element, so a component added later
+ * inherits the look by being a surface rather than by remembering to opt in. Small controls
+ * are deliberately absent — see the note above.
+ */
+.composer,
+.lane,
+.card-project,
+.frame,
+.recipe-card,
+.series-card,
+.library-sheet,
+.pane,
+.editor,
+.ed-video,
+.ed-gloss-panel,
+.tile,
+.task {
+  position: relative;
+  border-color: transparent;
+}
+
+.composer::before,
+.lane::before,
+.card-project::before,
+.frame::before,
+.recipe-card::before,
+.series-card::before,
+.library-sheet::before,
+.pane::before,
+.editor::before,
+.ed-video::before,
+.ed-gloss-panel::before,
+.tile::before,
+.task::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--spin),
+    rgba(255, 195, 107, 0.7),
+    rgba(122, 162, 255, 0.42),
+    rgba(196, 132, 255, 0.46),
+    rgba(110, 231, 168, 0.34),
+    rgba(255, 195, 107, 0.7)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  /*
+   * Every surface turns, all the time.
+   *
+   * Measured before assuming otherwise: 23 rimmed surfaces on the Your-videos screen render
+   * at 42fps, and the same page with every rim removed renders at 42fps. The gradient costs
+   * nothing worth trading the look for — what makes that page slower than 60 is the machine,
+   * not this. Hover only brightens it and speeds it up.
+   */
+  animation: spin-ring 18s linear infinite;
+  opacity: 0.5;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.composer:hover::before,
+.lane:hover::before,
+.card-project:hover::before,
+.frame:hover::before,
+.recipe-card:hover::before,
+.series-card:hover::before,
+.tile:hover::before,
+.task:hover::before,
+.composer:focus-within::before,
+.pane:focus-within::before,
+.editor:focus-within::before {
+  opacity: 0.95;
+  animation: spin-ring 14s linear infinite;
+}
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .composer::before,
+  .lane::before,
+  .card-project::before,
+  .frame::before,
+  .recipe-card::before,
+  .series-card::before,
+  .library-sheet::before,
+  .pane::before,
+  .editor::before,
+  .ed-video::before,
+  .ed-gloss-panel::before,
+  .tile::before,
+  .task::before {
+    animation: none;
+  }
+}
+
+/* Whatever is being worked on brightens; the rest stay a hairline of colour. */
+.rim:hover::before,
+.rim:focus-within::before {
+  opacity: 0.95;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rim::before {
+    animation: none;
+  }
+}
+
 .composer[data-sky='true'] {
   position: relative;
   border-color: transparent;
@@ -5089,4 +5335,124 @@ h1.big {
   .composer[data-sky='true']::after {
     animation: none;
   }
+}
+
+/*
+ * The picture strip on the writing console.
+ *
+ * The order is the edit — picture one plays under line one — so these are shown in sequence
+ * and numbered, not summarised as a count. Wraps rather than scrolls: a creator with thirty
+ * pictures needs to see the shape of the sequence, and a horizontal scroller hides most of it
+ * behind a gesture nobody performs on a form.
+ */
+.shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 18px 0;
+}
+
+.shot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 210px;
+  padding: 5px 5px 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.shot b {
+  font: 500 10px/1 var(--mono);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.shot small {
+  font: 400 11.5px/1.3 var(--ui);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shot-drop {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.shot-drop:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+}
+
+/*
+ * The wait indicator on "Hear it".
+ *
+ * Preparing a narration is one speech request per line against a per-minute quota, so a long
+ * script is minutes. A static label through that is indistinguishable from a hang — the
+ * elapsed seconds beside it say the work is alive, and this says it is moving.
+ */
+.spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  border-top-color: var(--accent);
+  animation: spinner 0.7s linear infinite;
+}
+
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still says "busy" without spinning: the ring pulses instead. */
+  .spinner {
+    animation: spinner-rest 1.4s ease-in-out infinite;
+  }
+  @keyframes spinner-rest {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/*
+ * The preview plate for a narrated video.
+ *
+ * There is no footage to play — the video is a sequence of stills the script is cut to — so
+ * the frame shows the picture belonging to the line currently on screen, and changes with it.
+ */
+.ed-plate {
+  position: absolute;
+  inset: 0;
+  background: #05070f;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+/* Both fill the frame the same way, so swapping a still for a clip does not resize anything. */
+.ed-plate video,
+.ed-plate-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background-size: cover;
+  background-position: center;
 }

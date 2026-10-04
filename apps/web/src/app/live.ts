@@ -130,6 +130,10 @@ function toScene(row: SceneOut, selected: boolean): Scene {
     hasVoice: Boolean(row.vo_asset_id),
     sourceStartMs: row.source_start_ms ?? null,
     media: asset ? `url("${assetUrl(asset)}")` : PENDING,
+    //: What this beat's picture actually is. A still is drawn, a clip is played — and the
+    //: asset URL says nothing either way, so the server tells us.
+    pictureUrl: asset ? assetUrl(asset) : null,
+    pictureIsClip: row.picture_is_clip ?? false,
     prompt: row.prompt,
     pace: 1,
     emphasis: [],
@@ -391,6 +395,18 @@ export function useLiveStudio() {
   const captionBottom = Number(channel.data?.identity?.caption_bottom ?? 0.16)
   //: Caption size as a multiplier on the default (5% of the frame's short edge).
   const captionScale = Number(channel.data?.identity?.caption_scale ?? 1)
+  /*
+   * Whether captions highlight word by word, or hold each line whole.
+   *
+   * On the identity kit rather than per render: it is a property of how the channel looks,
+   * the same as the style and the size, and a creator who wants still captions wants them on
+   * every video rather than remembering it at each export.
+   */
+  const captionKaraoke = channel.data?.identity?.caption_karaoke !== false
+  const setCaptionKaraoke = useCallback(
+    (on: boolean) => editChannel.mutate({ identity: { caption_karaoke: on } }),
+    [editChannel],
+  )
   const setCaptionScale = useCallback(
     (v: number) =>
       editChannel.mutate({
@@ -648,9 +664,10 @@ export function useLiveStudio() {
         caption_style: captionStyle,
         caption_bottom: captionBottom,
         caption_scale: captionScale,
+        caption_karaoke: captionKaraoke,
       })
     },
-    [startRender, captionStyle, captionBottom, captionScale],
+    [startRender, captionStyle, captionBottom, captionScale, captionKaraoke],
   )
 
   /** Add an empty card. The user fills it in; demanding a line up front makes this a form. */
@@ -915,6 +932,8 @@ export function useLiveStudio() {
     logoAssetId,
     setLogo,
     captionStyle,
+    captionKaraoke,
+    setCaptionKaraoke,
     captionBottom,
     setCaptionBottom,
     captionScale,

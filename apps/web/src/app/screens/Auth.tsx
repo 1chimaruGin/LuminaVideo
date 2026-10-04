@@ -112,12 +112,27 @@ export function Auth({ onDone }: { onDone: () => void }) {
             const Mark = MARKS[id]
             const provider = providers.data?.find((p) => p.id === id)
             const enabled = provider?.enabled ?? false
+            /*
+             * A button goes dim for two unrelated reasons, and naming the wrong one sends
+             * someone to the wrong fix. Unconfigured is a deployment question; unreachable is
+             * "the API is not running" — and until the list has actually arrived we know
+             * neither, because `enabled` falls back to false for both. Saying "not set up on
+             * this server" during an outage sends someone to check credentials that were
+             * never the problem.
+             */
+            const known = providers.isSuccess
             return (
               <button
                 key={id}
                 className="btn block"
                 disabled={!enabled || busy}
-                title={enabled ? undefined : `${NAMES[id]} sign-in is not set up on this server`}
+                title={
+                  enabled
+                    ? undefined
+                    : known
+                      ? `${NAMES[id]} sign-in is not set up on this server`
+                      : 'Cannot reach the server — check that the API is running'
+                }
                 onClick={() => {
                   // A full navigation, not fetch: the provider's consent screen has to be
                   // rendered by the browser, and it refuses to be framed or XHR'd.
@@ -133,7 +148,7 @@ export function Auth({ onDone }: { onDone: () => void }) {
               >
                 <Mark />
                 Continue with {NAMES[id]}
-                {!enabled && providers.isSuccess ? <em className="off">not set up</em> : null}
+                {!enabled && known ? <em className="off">not set up</em> : null}
               </button>
             )
           })}

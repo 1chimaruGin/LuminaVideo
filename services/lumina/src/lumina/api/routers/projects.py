@@ -50,6 +50,7 @@ from lumina.intelligence.languages import (
     COMMON_SOURCES,
     COMMON_TARGETS,
     UnsupportedLanguageError,
+    detect,
     detect_all,
     get_pack,
     packs,
@@ -242,7 +243,9 @@ async def create_project(
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"unknown recipe {body.recipe}") from None
 
-    if recipe in NEEDS_SOURCE and body.source_asset_id is None:
+    #: Narrate takes a *list* of pictures, so either field satisfies it. Checking only the
+    #: singular one refused a project that had supplied thirty images and no `source_asset_id`.
+    if recipe in NEEDS_SOURCE and body.source_asset_id is None and not body.source_asset_ids:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"{recipe.value} works on a file you upload; POST it to /uploads first",
@@ -298,11 +301,33 @@ async def create_project(
     #: improves it — reorders a clause, tightens a phrase, corrects what it takes for a
     #: mistake — and on this lane the words belong to the creator. Splitting is arithmetic;
     #: rewriting is a decision nobody asked for.
-    written = (
-        split_sentences(body.brief, get_pack(body.language)) if recipe is Recipe.NARRATE else []
-    )
-    if recipe is Recipe.NARRATE and not written:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "there is no script to narrate")
+    written: list[str] = []
+    grown: list[int] = []
+    if recipe is Recipe.NARRATE:
+        #: The language is read off the script rather than asked for. Burmese is Burmese by
+        #: codepoint, and the creator answered the question by typing.
+        project.language = detect(body.brief) or body.language
+
+        pack = get_pack(project.language)
+        written = split_sentences(body.brief, pack)
+        if not written:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "there is no script to narrate")
+
+        #: Fill the script out if it will not reach the length that was asked for.
+        #:
+        #: Length targets are a real constraint — they decide whether a video is a Short or
+        #: carries a mid-roll — and a script a minute short of one is a video that misses it.
+        #: The model is asked for another example or the next turn in the story, never for the
+        #: same thing at greater length, and it reports which lines it added so they can be
+        #: cut. Below eight seconds short, leave it alone: nobody notices, and a model asked
+        #: for one more sentence writes filler.
+        spoken_ms = sum(pack.caption_duration_ms(line) for line in written)
+        short_by = body.target_ms - spoken_ms
+        if short_by > 8_000:
+            written, added = await translate.expand(
+                written, language=project.language, needed_seconds=round(short_by / 1000)
+            )
+            grown = sorted(added)
 
     source = Source(brief=body.brief, target_ms=body.target_ms, lines=written)
     picture: uuid.UUID | None = None
@@ -323,6 +348,25 @@ async def create_project(
                 f"{recipe.value} writes its own script, so there is nothing to read a "
                 "subtitle file against. Subtitle and Clip take one.",
             )
+
+    #: The picture pool for a narrated video, in the order it was given.
+    #:
+    #: `source_asset_id` stays the single-file field every other lane uses; this is the list
+    #: that makes a *sequence* possible. A lane that changes visual every few seconds cannot
+    #: express itself through one foreign key.
+    pool: list[Asset] = []
+    if recipe is Recipe.NARRATE and body.source_asset_ids:
+        for asset_id in body.source_asset_ids:
+            found = await session.get(Asset, asset_id)
+            if found is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"no such upload {asset_id}")
+            if found.kind not in (AssetKind.IMAGE.value, AssetKind.VIDEO.value):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Narrate shows pictures and clips. That file is neither.",
+                )
+            pool.append(found)
+        project.source_asset_id = pool[0].id
 
     if body.source_asset_id is not None:
         asset = await session.get(Asset, body.source_asset_id)
@@ -366,8 +410,17 @@ async def create_project(
             #: Subtitling's lines come from the file or the speech engine and are
             #: authoritative — see planner.plan. Every other lane writes its own.
             "lines": source.lines or None,
+            #: Which of those lines the model wrote, so the editor can mark them. An
+            #: expansion the creator cannot tell apart from their own writing is a tool
+            #: quietly changing what they meant to say.
+            "written_by_us": grown,
         },
     )
+    #: Pictures onto beats, now that both exist. After planning because the beats are what
+    #: they attach to; before returning because the Recipe screen shows the storyboard.
+    if pool:
+        await _lay_pictures(session, uuid.UUID(out["plan_id"]), pool)
+
     # The target track, once the scenes exist to hang it on. After planning rather than before
     # so the transcript survives in `script_line`, and written into `translations` — the same
     # place `POST /projects/{id}/tracks/{lang}` writes, so a track added later and one made
@@ -492,15 +545,31 @@ class Source:
     windows: list[tuple[int, int]] = field(default_factory=list)
 
 
-def _with_languages(scenes: Sequence[Scene]) -> list[SceneOut]:
-    """The scenes, each told which language its own line is in.
+async def _with_languages(session: Session, scenes: Sequence[Scene]) -> list[SceneOut]:
+    """The scenes, each told which language its own line is in and what kind of picture it has.
 
-    Resolved across the whole plan rather than line by line: a line of kanji with no kana is
-    Chinese on its own and Japanese in a Japanese file, and only the file can settle it.
+    Language is resolved across the whole plan rather than line by line: a line of kanji with
+    no kana is Chinese on its own and Japanese in a Japanese file, and only the file can
+    settle it.
+
+    The picture's *kind* is sent for a duller reason — the asset URL carries no extension, so
+    the browser cannot tell a still from a clip, and it must, because one is drawn and the
+    other is played.
     """
     out = [SceneOut.model_validate(s) for s in scenes]
     for row, code in zip(out, detect_all(s.script_line for s in scenes), strict=True):
         row.spoken_language = code
+
+    wanted = {s.final_asset_id or s.preview_asset_id for s in scenes} - {None}
+    if wanted:
+        clips = {
+            row.id
+            for row in await session.scalars(
+                select(Asset).where(Asset.id.in_(wanted), Asset.kind == AssetKind.VIDEO.value)
+            )
+        }
+        for row, scene in zip(out, scenes, strict=True):
+            row.picture_is_clip = (scene.final_asset_id or scene.preview_asset_id) in clips
     return out
 
 
@@ -519,6 +588,29 @@ def _as_bed(body: NewProject, project: Project, asset: Asset, source: Source) ->
         )
     project.title = (body.title or source.lines[0] if source.lines else "Untitled")[:80]
     return source
+
+
+async def _lay_pictures(session: Session, plan_id: uuid.UUID, assets: list[Asset]) -> int:
+    """Give every beat a picture, cycling through what the creator supplied.
+
+    In order, not matched. Choosing *which* picture suits which sentence is semantic work —
+    an embedding or a model call per beat — and it is the part a person fixes in seconds on
+    the storyboard. Assembling in order and letting them swap the two that landed wrong is
+    how the real workflows run, and it costs nothing.
+
+    Cycling rather than running out: twelve images across forty beats repeat, which reads as
+    a motif. Leaving twenty-eight beats blank fails the render.
+    """
+    if not assets:
+        return 0
+
+    scenes = list(
+        await session.scalars(select(Scene).where(Scene.plan_id == plan_id).order_by(Scene.index))
+    )
+    for i, scene in enumerate(scenes):
+        scene.preview_asset_id = assets[i % len(assets)].id
+    await session.flush()
+    return len(scenes)
 
 
 async def _from_source(
@@ -858,14 +950,28 @@ async def dub_preview(
         )
     )
     heard = project.source_language or project.language
-    cues = [
-        speak.Cue(
-            text=stages.line_for(scene, project.language, heard),
-            start_ms=scene.source_start_ms or 0,
-            duration_ms=scene.duration_ms,
+
+    #: Where each line goes, and the two kinds of lane disagree.
+    #:
+    #: A lane that keeps the creator's footage has a timestamp per scene — the moment it was
+    #: said — and the speech belongs there. A lane that writes its own video has none; its
+    #: scenes are laid end to end, so a line starts where the one before it ended.
+    #:
+    #: `source_start_ms or 0` was right for the first and silently wrong for the second: every
+    #: line was written at offset zero, on top of the one before it, so a narration preview
+    #: came back as a dozen sentences stacked into the first few seconds.
+    cues = []
+    at = 0
+    for scene in scenes:
+        start = scene.source_start_ms if scene.source_start_ms is not None else at
+        cues.append(
+            speak.Cue(
+                text=stages.line_for(scene, project.language, heard),
+                start_ms=start,
+                duration_ms=scene.duration_ms,
+            )
         )
-        for scene in scenes
-    ]
+        at = start + scene.duration_ms
     if not cues:
         raise HTTPException(status.HTTP_409_CONFLICT, "nothing to say")
 
@@ -1186,6 +1292,7 @@ async def _plan(session: Session, plan_id: uuid.UUID) -> PlanOut:
         duration_ms=duration,
         keeps_whole_source=whole,
         recipe=project.recipe if project else "explainer",
+        written_by_us=[int(i) for i in plan.content.get("written_by_us", [])],
         caption_languages=(
             list(project.caption_languages) or [project.language] if project else []
         ),
@@ -1194,6 +1301,6 @@ async def _plan(session: Session, plan_id: uuid.UUID) -> PlanOut:
         version=plan.version,
         title=str(plan.content.get("title", "")),
         summary=str(plan.content.get("summary", "")),
-        scenes=_with_languages(plan.scenes),
+        scenes=await _with_languages(session, plan.scenes),
         moments=[Moment.model_validate(m) for m in raw],
     )
